@@ -1,0 +1,18 @@
+{
+  "name": "{{packageName}}",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "hibana dev",
+    "deploy": "hibana deploy",
+    "build": "npm run build:ts",
+    "test": "echo \"Add project tests\" && exit 0",
+    "build:ts": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cloudflare/workers-types": "^4.20240903.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  }
+}

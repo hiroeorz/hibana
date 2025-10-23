@@ -1,0 +1,4 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cloudflare/workers-sdk/main/templates/d1/schema-manifest.schema.json",
+  "tables": []
+}

@@ -1,0 +1,6 @@
+name = "{{packageName}}"
+main = "src/index.ts"
+compatibility_date = "{{compatibilityDate}}"
+
+[triggers]
+crons = []
