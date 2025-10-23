@@ -13,7 +13,9 @@
     "@cloudflare/workers-types": "^4.20240903.0"
   },
   "devDependencies": {
-    "@hibana/cli": "^0.1.0",
+    "@hibana/cli": "file:../packages/cli",
+    "@ruby/3.4-wasm-wasi": "^2.7.2",
+    "@ruby/wasm-wasi": "^2.7.2",
     "typescript": "^5.5.4",
     "wrangler": "^3.62.0"
   }

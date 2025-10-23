@@ -25,7 +25,9 @@ describe('createProject', () => {
 
     expect(packageData.name).toBe('example-app');
     expect(packageData.devDependencies).toMatchObject({
-      '@hibana/cli': expect.any(String),
+      '@hibana/cli': 'file:../packages/cli',
+      '@ruby/3.4-wasm-wasi': expect.any(String),
+      '@ruby/wasm-wasi': expect.any(String),
       wrangler: expect.any(String)
     });
 
@@ -39,7 +41,10 @@ describe('createProject', () => {
     expect(gitignore).toContain('/node_modules');
 
     const rakefile = await readFile(path.join(projectPath, 'Rakefile'), 'utf8');
-    expect(rakefile).toContain("namespace :wasm");
+    expect(rakefile).toContain("require_relative 'lib/hibana/wasm/builder'");
+
+    const builder = await readFile(path.join(projectPath, 'lib', 'hibana', 'wasm', 'builder.rb'), 'utf8');
+    expect(builder).toContain('module Hibana');
   });
 });
 

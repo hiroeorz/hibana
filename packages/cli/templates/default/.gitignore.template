@@ -1,6 +1,7 @@
 /.wrangler
 /node_modules
 /dist
+/dist/wasm
 /tmp
 /.bundle
 /.ruby-lsp

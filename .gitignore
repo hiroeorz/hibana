@@ -6,3 +6,4 @@ coverage
 AGENTS.md
 .env
 my-app/
+wasm-compile/
