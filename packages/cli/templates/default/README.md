@@ -21,4 +21,10 @@ The WASM build step copies the official `@ruby/3.4-wasm-wasi` runtime into `dist
 - `npm run deploy` — deploy the Worker with optimized Ruby WASM assets.
 - `npm run test` — run the project's test suites (fill in once tests exist).
 
+## Runtime Notes
+
+- `app/app.rb` must define `Hibana::ENTRYPOINT`, a Rack-compatible object that responds to `call(env)`.
+- Each request is transformed into a Rack env hash inside `Hibana::Runtime` (embedded by the Worker shim) and dispatched to `Hibana::ENTRYPOINT`.
+- Update `Hibana::Runtime` logic in `src/index.ts` if your application needs custom request/response shaping.
+
 Happy hacking!

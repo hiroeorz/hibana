@@ -24,15 +24,19 @@ describe('createProject', () => {
     const packageData = JSON.parse(packageJson) as Record<string, unknown>;
 
     expect(packageData.name).toBe('example-app');
+    expect(packageData.dependencies).toMatchObject({
+      '@ruby/wasm-wasi': expect.any(String)
+    });
     expect(packageData.devDependencies).toMatchObject({
       '@hibana/cli': 'file:../packages/cli',
       '@ruby/3.4-wasm-wasi': expect.any(String),
-      '@ruby/wasm-wasi': expect.any(String),
       wrangler: expect.any(String)
     });
 
     const appRb = await readFile(path.join(projectPath, 'app', 'app.rb'), 'utf8');
     expect(appRb).toContain('class ExampleApp');
+    expect(appRb).toContain('module Hibana');
+    expect(appRb).toContain('ENTRYPOINT');
 
     const wrangler = await readFile(path.join(projectPath, 'wrangler.toml'), 'utf8');
     expect(wrangler).toContain(`compatibility_date = "${result.metadata.compatibilityDate}"`);
@@ -50,6 +54,10 @@ describe('createProject', () => {
     expect(tsconfig).toContain('"src/**/*.d.ts"');
 
     await expect(readFile(path.join(projectPath, 'src', 'types', 'wasm.d.ts'), 'utf8')).resolves.toContain('declare module');
+    await expect(readFile(path.join(projectPath, 'src', 'types', 'json.d.ts'), 'utf8')).resolves.toContain('declare module');
+
+    const gemfile = await readFile(path.join(projectPath, 'Gemfile'), 'utf8');
+    expect(gemfile).toContain("gem 'base64'");
   });
 });
 

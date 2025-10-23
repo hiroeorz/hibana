@@ -6,3 +6,7 @@ class {{moduleName}}
     [200, { 'content-type' => 'text/plain; charset=utf-8' }, ["Hello from Hibana Ruby!\n"]]
   end
 end
+
+module Hibana
+  ENTRYPOINT = {{moduleName}}.new
+end

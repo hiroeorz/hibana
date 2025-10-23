@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'base64'
 require 'digest'
 require 'fileutils'
 require 'json'
@@ -25,6 +26,7 @@ module Hibana
       DEFAULT_WASM_FILENAME = 'app.wasm'
       DEFAULT_SOURCES_ARCHIVE = 'sources.tar.gz'
       DEFAULT_MANIFEST_FILENAME = 'manifest.json'
+      DEFAULT_MANIFEST_MODULE = 'manifest.js'
       DEFAULT_ENTRYPOINT = 'app/app.rb'
       DEFAULT_RUNTIME_PACKAGE = '@ruby/3.4-wasm-wasi'
       DEFAULT_RUNTIME_FILENAME = 'ruby+stdlib.wasm'
@@ -162,10 +164,12 @@ module Hibana
               size: File.size(path),
               digest: Digest::SHA256.file(path).hexdigest
             }
-          end
+          end,
+          source_contents: encoded_source_contents
         }
 
         File.write(manifest_path, JSON.pretty_generate(manifest))
+        write_manifest_module(manifest)
         manifest_path
       end
 
@@ -182,6 +186,17 @@ module Hibana
 
       def output_dir
         @output_dir ||= project_root.join(DEFAULT_OUTPUT_DIR)
+      end
+
+      def encoded_source_contents
+        @encoded_source_contents ||= begin
+          contents = {}
+          source_files.each do |file_path|
+            relative = relativize(file_path)
+            contents[relative] = Base64.strict_encode64(File.binread(file_path))
+          end
+          contents
+        end
       end
 
       def package_sources
@@ -213,8 +228,14 @@ module Hibana
         path
       end
 
-      def builder_source_dir
-        @builder_source_dir ||= project_root.join('lib', 'hibana', 'wasm').to_s
+      def write_manifest_module(manifest)
+        module_path = output_dir.join(DEFAULT_MANIFEST_MODULE)
+        content = <<~JS
+          export const manifest = #{JSON.generate(manifest)};
+          export default manifest;
+        JS
+
+        File.write(module_path, content)
       end
     end
   end
