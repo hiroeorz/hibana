@@ -1,0 +1,10 @@
+# frozen_string_literal: true
+
+namespace :wasm do
+  desc 'Build the Ruby WASM bundle (placeholder task)'
+  task :build do
+    puts 'TODO: Implement Ruby WASM build pipeline.'
+  end
+end
+
+task default: 'wasm:build'

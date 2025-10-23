@@ -23,6 +23,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "chokidar": "^3.6.0",
     "commander": "^12.1.0"
   },
   "devDependencies": {

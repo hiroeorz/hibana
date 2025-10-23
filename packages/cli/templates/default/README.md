@@ -12,7 +12,7 @@ npm run dev
 
 ## Scripts
 
-- `npm run dev` — start the Hibana development loop (wrangler proxy + WASM rebuild).
+- `npm run dev` — start the Hibana development loop. When Ruby files change, `bundle exec rake wasm:build` runs automatically.
 - `npm run deploy` — deploy the Worker with optimized Ruby WASM assets.
 - `npm run test` — run the project's test suites (fill in once tests exist).
 

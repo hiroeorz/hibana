@@ -19,8 +19,15 @@ describe('createProject', () => {
     const projectPath = path.join(tempRoot, 'example-app');
     expect(result.targetDir).toBe(projectPath);
 
-    const packageJson = await readFile(path.join(projectPath, 'package.json'), 'utf8');
-    expect(packageJson).toContain('"name": "example-app"');
+    const packageJsonPath = path.join(projectPath, 'package.json');
+    const packageJson = await readFile(packageJsonPath, 'utf8');
+    const packageData = JSON.parse(packageJson) as Record<string, unknown>;
+
+    expect(packageData.name).toBe('example-app');
+    expect(packageData.devDependencies).toMatchObject({
+      '@hibana/cli': expect.any(String),
+      wrangler: expect.any(String)
+    });
 
     const appRb = await readFile(path.join(projectPath, 'app', 'app.rb'), 'utf8');
     expect(appRb).toContain('class ExampleApp');
@@ -30,6 +37,9 @@ describe('createProject', () => {
 
     const gitignore = await readFile(path.join(projectPath, '.gitignore'), 'utf8');
     expect(gitignore).toContain('/node_modules');
+
+    const rakefile = await readFile(path.join(projectPath, 'Rakefile'), 'utf8');
+    expect(rakefile).toContain("namespace :wasm");
   });
 });
 
