@@ -45,6 +45,11 @@ describe('createProject', () => {
 
     const builder = await readFile(path.join(projectPath, 'lib', 'hibana', 'wasm', 'builder.rb'), 'utf8');
     expect(builder).toContain('module Hibana');
+
+    const tsconfig = await readFile(path.join(projectPath, 'tsconfig.json'), 'utf8');
+    expect(tsconfig).toContain('"src/**/*.d.ts"');
+
+    await expect(readFile(path.join(projectPath, 'src', 'types', 'wasm.d.ts'), 'utf8')).resolves.toContain('declare module');
   });
 });
 
