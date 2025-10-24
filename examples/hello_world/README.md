@@ -1,4 +1,4 @@
-# {{projectName}}
+# hello_world
 
 This project was generated with the Hibana CLI.
 

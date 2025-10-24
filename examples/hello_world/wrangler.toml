@@ -1,0 +1,6 @@
+name = "hello-world"
+main = "src/index.ts"
+compatibility_date = "2025-10-24"
+
+[triggers]
+crons = []

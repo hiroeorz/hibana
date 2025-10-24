@@ -1,0 +1,18 @@
+# frozen_string_literal: true
+
+require 'bundler/setup'
+require_relative 'lib/hibana/wasm/builder'
+
+namespace :wasm do
+  desc 'Build the Ruby WebAssembly bundle'
+  task :build do
+    builder = Hibana::Wasm::Builder.new
+    report = builder.build
+    puts report.summary
+  rescue Hibana::Wasm::BuildError => e
+    warn e.message
+    raise
+  end
+end
+
+task default: 'wasm:build'
