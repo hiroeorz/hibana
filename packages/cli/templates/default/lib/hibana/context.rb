@@ -41,8 +41,17 @@ module Hibana
       response.text(body, status: status)
     end
 
-    def json(payload, status: nil)
-      response.json(payload, status: status)
+    def json(payload = nil, status: nil, **payload_kwargs)
+      final_payload =
+        if payload_kwargs.empty?
+          payload
+        elsif payload.nil?
+          payload_kwargs
+        else
+          raise ArgumentError, 'payload must be provided either as a positional argument or keyword hash, not both'
+        end
+
+      response.json(final_payload, status: status)
     end
 
     def header(key, value)

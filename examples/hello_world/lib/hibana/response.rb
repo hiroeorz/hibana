@@ -38,10 +38,19 @@ module Hibana
       content
     end
 
-    def json(payload, status: nil)
+    def json(payload = nil, status: nil, **payload_kwargs)
+      final_payload =
+        if payload_kwargs.empty?
+          payload
+        elsif payload.nil?
+          payload_kwargs
+        else
+          raise ArgumentError, 'payload must be provided either as a positional argument or keyword hash, not both'
+        end
+
       self.status = status if status
       headers['content-type'] ||= 'application/json; charset=utf-8'
-      self.body = JSON.generate(payload)
+      self.body = JSON.generate(final_payload)
     end
 
     def finish
