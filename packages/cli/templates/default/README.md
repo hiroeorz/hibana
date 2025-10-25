@@ -18,7 +18,7 @@ The WASM build step copies the official `@ruby/3.4-wasm-wasi` runtime into `dist
 ## Scripts
 
 - `npm run dev` — start the Hibana development loop. When Ruby files change, `bundle exec rake wasm:build` runs automatically.
-- `npm run deploy` — deploy the Worker with optimized Ruby WASM assets.
+- `npm run deploy` — run `bundle exec rake wasm:build`, `npm run build`, then deploy via `hibana deploy` (use `--skip-ruby-build` / `--skip-assets-build` as needed).
 - `npm run test` — run the project's test suites (fill in once tests exist).
 
 ## Runtime Notes

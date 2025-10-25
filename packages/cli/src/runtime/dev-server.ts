@@ -5,16 +5,13 @@ import path from 'node:path';
 
 import chokidar, { FSWatcher } from 'chokidar';
 
+import { runBundleBuild, RubyBuildResult } from './bundle.js';
+
 interface DevServerOptions {
   port?: string;
   wranglerArgs?: string[];
   projectRoot?: string;
 }
-
-type RubyBuildResult =
-  | { status: 'success' }
-  | { status: 'missing-bundle' }
-  | { status: 'failed'; exitCode: number | null };
 
 export const runDevServer = async (options: DevServerOptions): Promise<void> => {
   const projectRoot = options.projectRoot ?? process.cwd();
@@ -167,7 +164,7 @@ class RubyBuilder {
 
   private async execute(reason: string): Promise<void> {
     console.log(`Rebuilding Ruby WASM bundle (trigger: ${reason})`);
-    const result = await runBundleRakeTask(this.projectRoot);
+    const result = await runBundleBuild(this.projectRoot);
 
     if (result.status === 'success') {
       console.log('Ruby WASM build completed.');
@@ -185,40 +182,6 @@ class RubyBuilder {
     );
   }
 }
-
-const runBundleRakeTask = (projectRoot: string): Promise<RubyBuildResult> => {
-  const bundleCommand = process.platform === 'win32' ? 'bundle.cmd' : 'bundle';
-  const args = ['exec', 'rake', 'wasm:build'];
-
-  return new Promise((resolve) => {
-    const child = spawn(bundleCommand, args, {
-      cwd: projectRoot,
-      stdio: 'inherit',
-      env: {
-        ...process.env
-      }
-    });
-
-    child.on('error', (error: NodeJS.ErrnoException) => {
-      if (error.code === 'ENOENT') {
-        resolve({ status: 'missing-bundle' });
-      } else {
-        console.error('Failed to run Bundler:', error);
-        resolve({ status: 'failed', exitCode: null });
-      }
-    });
-
-    child.on('close', (code, signal) => {
-      if (signal) {
-        resolve({ status: 'failed', exitCode: null });
-      } else if (code === 0) {
-        resolve({ status: 'success' });
-      } else {
-        resolve({ status: 'failed', exitCode: code ?? null });
-      }
-    });
-  });
-};
 
 const pathExists = async (target: string): Promise<boolean> => {
   try {
