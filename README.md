@@ -32,6 +32,12 @@ Deploy to Cloudflare workeres.
 hibana deploy
 ```
 
+Build the WebAssembly bundle manually (normally handled inside `hibana dev` / `hibana deploy`).
+
+```bash
+bundle exec rake wasm:build
+```
+
 ## Development Environment
 
 ```bash
