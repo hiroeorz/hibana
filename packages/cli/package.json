@@ -19,7 +19,7 @@
     "build": "tsup --config tsup.config.ts",
     "dev": "tsx src/index.ts",
     "lint": "eslint .",
-    "test": "vitest",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -7,6 +7,8 @@ import chokidar, { FSWatcher } from 'chokidar';
 
 interface DevServerOptions {
   port?: string;
+  wranglerArgs?: string[];
+  projectRoot?: string;
 }
 
 type RubyBuildResult =
@@ -15,13 +17,16 @@ type RubyBuildResult =
   | { status: 'failed'; exitCode: number | null };
 
 export const runDevServer = async (options: DevServerOptions): Promise<void> => {
-  const projectRoot = process.cwd();
+  const projectRoot = options.projectRoot ?? process.cwd();
 
   await assertProjectIsScaffolded(projectRoot);
   const rubyWatcher = await startRubyBuildLoop(projectRoot);
 
   try {
-    await runWranglerDev(projectRoot, options);
+    await runWranglerDev(projectRoot, {
+      port: options.port,
+      wranglerArgs: options.wranglerArgs ?? []
+    });
   } finally {
     if (rubyWatcher) {
       await rubyWatcher.close();
@@ -36,12 +41,21 @@ const assertProjectIsScaffolded = async (projectRoot: string): Promise<void> => 
   }
 };
 
-const runWranglerDev = (projectRoot: string, options: DevServerOptions): Promise<void> => {
+const runWranglerDev = (
+  projectRoot: string,
+  options: { port?: string; wranglerArgs: string[] }
+): Promise<void> => {
   const npxCommand = process.platform === 'win32' ? 'npx.cmd' : 'npx';
   const args = ['wrangler', 'dev'];
 
-  if (options.port) {
+  const wranglerArgs = options.wranglerArgs;
+
+  if (options.port && !hasPortArgument(wranglerArgs)) {
     args.push('--port', options.port);
+  }
+
+  if (wranglerArgs.length > 0) {
+    args.push(...wranglerArgs);
   }
 
   return new Promise((resolve, reject) => {
@@ -97,7 +111,7 @@ const startRubyBuildLoop = async (projectRoot: string): Promise<FSWatcher | null
   const builder = new RubyBuilder(projectRoot);
   await builder.run('initial');
 
-  const watcher = chokidar.watch(['app/**/*.rb', 'lib/**/*.rb'], {
+  const watcher = chokidar.watch(['app/**/*.rb', 'lib/**/*.rb', 'config/**/*.rb'], {
     cwd: projectRoot,
     ignoreInitial: true
   });
@@ -220,4 +234,20 @@ const pathExists = async (target: string): Promise<boolean> => {
 
 const isEnoent = (error: unknown): error is NodeJS.ErrnoException => {
   return Boolean(error && typeof error === 'object' && 'code' in error && (error as NodeJS.ErrnoException).code === 'ENOENT');
+};
+
+const hasPortArgument = (args: string[]): boolean => {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === '--port') {
+      return true;
+    }
+    if (arg.startsWith('--port=')) {
+      return true;
+    }
+    if (arg === '-p') {
+      return true;
+    }
+  }
+  return false;
 };

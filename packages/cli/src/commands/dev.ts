@@ -3,13 +3,20 @@ import { Command } from 'commander';
 import { runDevServer } from '../runtime/dev-server.js';
 
 export const registerDevCommand = (program: Command): void => {
-  program
-    .command('dev')
-    .description('Run the local development server')
+  const dev = program.command('dev').description('Run the local development server');
+
+  dev
     .option('--port <port>', 'Override the default Wrangler port')
-    .action(async (options: { port?: string }) => {
+    .allowExcessArguments(true)
+    .passThroughOptions()
+    .action(async (options: { port?: string }, command: Command) => {
       try {
-        await runDevServer({ port: options.port });
+        const wranglerArgs = command.args ?? [];
+        await runDevServer({
+          port: options.port,
+          wranglerArgs,
+          projectRoot: command.parent?.getOptionValue('cwd') ?? process.cwd()
+        });
       } catch (error: unknown) {
         console.error('Failed to start Hibana dev server.');
         if (error instanceof Error) {
