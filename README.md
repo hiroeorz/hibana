@@ -6,6 +6,34 @@ Hibana is an experimental Ruby framework tailored for Cloudflare Workers. It lev
 ## Quick Start
 The repository currently contains a monorepo with a work-in-progress CLI and sample templates. To try the stack locally:
 
+Create New Project
+
+```bash
+hibana new my-project
+```
+
+Build
+
+```bash
+cd my-project
+npm install
+bundle install
+```
+
+Start development server.
+
+```bash
+hibana dev
+```
+
+Deploy to Cloudflare workeres.
+
+```bash
+hibana deploy
+```
+
+## Development Environment
+
 ```bash
 # install Node.js dependencies (Node >= 22 recommended)
 npm install
@@ -22,7 +50,11 @@ npm install
 bundle install  # requires Ruby 3.4.7 with Bundler
 
 # run the development loop (wrangler dev + Ruby WASM auto rebuilds)
-npm run dev
+./packages/cli/bin/hibana.js dev
+
+# run a deployment (build Ruby + npm assets, then wrangler deploy)
+wrangler login
+./packages/cli/bin/hibana.js deploy
 ```
 
 The generated Worker imports `dist/wasm/app.wasm`, boots the Ruby VM via `@ruby/wasm-wasi`, and forwards requests to the Rack-style endpoint defined in `app/app.rb` (`Hibana::ENTRYPOINT`). The default template returns `Hello from Hibana Ruby!`.
