@@ -48,7 +48,7 @@ npm install
 npm run build --workspace @hibana/cli
 
 # create a sample project (generates my-app/)
-node packages/cli/bin/hibana.js new my-app
+./packages/cli/bin/hibana.js new my-app
 cd my-app
 
 # install project deps
@@ -66,7 +66,7 @@ wrangler login
 The generated Worker imports `dist/wasm/app.wasm`, boots the Ruby VM via `@ruby/wasm-wasi`, and forwards requests to the Rack-style endpoint defined in `app/app.rb` (`Hibana::ENTRYPOINT`). The default template returns `Hello from Hibana Ruby!`.
 
 ## Requirements & Notes
-- Ruby 3.4.7 (preview) with WASM/WASI support, plus Bundler.
+- Ruby 3.4.7 with WASM/WASI support, plus Bundler.
 - Node.js 22+ and npm.
 - Cloudflare Wrangler v4 (`devDependencies` in the template pin the minimum version).
 - The CLI builds a manifest (`dist/wasm/manifest.{json,js}`) containing embedded Ruby sources. Workers load this manifest dynamically to hydrate the Ruby VM.
