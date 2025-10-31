@@ -1,7 +1,7 @@
 # Hibana 🧨
 
 Hibana is a lightweight CLI that quickly fetches the Cloudflare Workers + Ruby template.
-After generating a project you can write HTTP APIs with a familiar, Sinatra-style DSL.
+After generating a project you can write HTTP APIs with a familiar, Hono・Sinatra-style DSL.
 
 Running `npm create hibana@latest <project-name>` clones the template, initializes configuration files, and prints the next steps. Day-to-day development, builds, and deployments rely on the Wrangler commands bundled with the template.
 

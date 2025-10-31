@@ -1,7 +1,7 @@
 # Hibana 🧨
 
 Hibanaは、Cloudflare Workers + Ruby構成のテンプレートを手早く取得するための最小構成CLIです。
-プロジェクト作成後は、Sinatraライクなシンプルな構文で HTTP API を記述できます。
+プロジェクト作成後は、Hono・Sinatraライクなシンプルな構文で HTTP API を記述できます。
 
 `npm create hibana@latest <project-name>` を実行するだけでテンプレートのクローン、設定ファイルの初期化、次の手順案内までを自動化します。実際の開発・ビルド・デプロイはテンプレートに含まれるWranglerコマンドに委ねます。
 
