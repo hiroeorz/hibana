@@ -6,9 +6,10 @@ import { fileURLToPath } from "node:url";
 import {
   ConfigUpdateError,
   ProjectDirExistsError,
-  TemplateDownloadError
+  TemplateDownloadError,
+  TemplateFinalizeError
 } from "./errors.js";
-import { cloneTemplate } from "./template.js";
+import { cloneTemplate, finalizeTemplate } from "./template.js";
 import { updateConfigs } from "./config-editor.js";
 import {
   DEFAULT_TEMPLATE_REF,
@@ -18,7 +19,9 @@ import {
   renderError,
   renderStart,
   renderStep,
-  renderSuccess
+  renderSuccess,
+  startSpinner,
+  stopSpinner
 } from "./ui.js";
 
 /** CLIオプションの型定義 */
@@ -65,6 +68,7 @@ export async function runCli(argv: string[]) {
 
   renderStart(projectName);
   renderStep("Fetching template");
+  startSpinner("Downloading template");
   await cloneTemplate({
     projectName,
     targetDir,
@@ -72,6 +76,10 @@ export async function runCli(argv: string[]) {
     templateRef: options.ref,
     force: options.force
   });
+  stopSpinner();
+
+  renderStep("Preparing template files");
+  await finalizeTemplate(targetDir);
 
   renderStep("Updating configuration");
   await updateConfigs({
@@ -92,6 +100,8 @@ function handleCliError(error: unknown) {
     );
   } else if (error instanceof TemplateDownloadError) {
     renderError("Failed to download template.", error.message);
+  } else if (error instanceof TemplateFinalizeError) {
+    renderError("Failed to prepare template.", error.message);
   } else if (error instanceof ConfigUpdateError) {
     renderError("Failed to update configuration files.", error.message);
   } else if (error instanceof Error) {

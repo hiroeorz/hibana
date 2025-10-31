@@ -1,10 +1,13 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_TEMPLATE_REF, DEFAULT_TEMPLATE_REPO } from "../src/constants.js";
-import { cloneTemplate } from "../src/template.js";
-import { ProjectDirExistsError } from "../src/errors.js";
+import { cloneTemplate, finalizeTemplate } from "../src/template.js";
+import {
+  ProjectDirExistsError,
+  TemplateFinalizeError
+} from "../src/errors.js";
 
 const degitCloneMock = vi.fn();
 const degitFactoryMock = vi.fn(
@@ -74,5 +77,53 @@ describe("cloneTemplate", () => {
       expect.objectContaining({ force: false })
     );
     expect(degitCloneMock).toHaveBeenCalledWith(target);
+  });
+});
+
+describe("finalizeTemplate", () => {
+  it("app.rbをバックアップしてシンプル版に差し替える", async () => {
+    const target = join(tempRoot, "finalize-success");
+    await mkdir(join(target, "app"), { recursive: true });
+    await writeFile(join(target, "app", "app.rb"), "full version\n", "utf8");
+    await writeFile(
+      join(target, "app", "app-simple.rb"),
+      "simple version\n",
+      "utf8"
+    );
+
+    await finalizeTemplate(target);
+
+    const fullBackup = await readFile(
+      join(target, "app", "app-full.rb"),
+      "utf8"
+    );
+    const activeEntry = await readFile(join(target, "app", "app.rb"), "utf8");
+
+    expect(fullBackup).toBe("full version\n");
+    expect(activeEntry).toBe("simple version\n");
+  });
+
+  it("app.rbが存在しない場合はエラーになる", async () => {
+    const target = join(tempRoot, "missing-original");
+    await mkdir(join(target, "app"), { recursive: true });
+    await writeFile(
+      join(target, "app", "app-simple.rb"),
+      "simple version\n",
+      "utf8"
+    );
+
+    await expect(finalizeTemplate(target)).rejects.toBeInstanceOf(
+      TemplateFinalizeError
+    );
+  });
+
+  it("app-simple.rbが存在しない場合はエラーになる", async () => {
+    const target = join(tempRoot, "missing-simple");
+    await mkdir(join(target, "app"), { recursive: true });
+    await writeFile(join(target, "app", "app.rb"), "full version\n", "utf8");
+
+    await expect(finalizeTemplate(target)).rejects.toBeInstanceOf(
+      TemplateFinalizeError
+    );
   });
 });

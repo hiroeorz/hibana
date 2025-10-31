@@ -16,6 +16,7 @@ vi.mock("degit", () => ({
   default: () => ({
     clone: async (dir: string) => {
       await mkdir(dir, { recursive: true });
+      await mkdir(join(dir, "app"), { recursive: true });
       await writeFile(
         join(dir, "package.json"),
         JSON.stringify({ name: "template-app" }, null, 2),
@@ -24,6 +25,16 @@ vi.mock("degit", () => ({
       await writeFile(
         join(dir, "wrangler.toml"),
         'name = "template-app"\n',
+        "utf8"
+      );
+      await writeFile(
+        join(dir, "app", "app.rb"),
+        "# full entrypoint\n",
+        "utf8"
+      );
+      await writeFile(
+        join(dir, "app", "app-simple.rb"),
+        "# simple entrypoint\n",
         "utf8"
       );
     }
@@ -55,8 +66,18 @@ describe("CLI end-to-end", () => {
       join(tempRoot, projectName, "wrangler.toml"),
       "utf8"
     );
+    const fullEntrypoint = await readFile(
+      join(tempRoot, projectName, "app", "app-full.rb"),
+      "utf8"
+    );
+    const activeEntrypoint = await readFile(
+      join(tempRoot, projectName, "app", "app.rb"),
+      "utf8"
+    );
 
     expect(pkg.name).toBe(projectName);
     expect(wrangler).toContain(`name = "${projectName}"`);
+    expect(fullEntrypoint).toContain("# full entrypoint");
+    expect(activeEntrypoint).toContain("# simple entrypoint");
   });
 });

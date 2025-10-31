@@ -14,6 +14,14 @@ export class TemplateDownloadError extends Error {
   }
 }
 
+/** テンプレートの最終調整に失敗した場合のエラー */
+export class TemplateFinalizeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TemplateFinalizeError";
+  }
+}
+
 /** 設定ファイルの更新に失敗した場合のエラー */
 export class ConfigUpdateError extends Error {
   constructor(message: string) {
