@@ -1,16 +1,32 @@
 {
   "name": "create-hibana",
-  "version": "0.1.0",
-  "description": "CLIツール: Cloudflare Workers + Rubyテンプレートのプロジェクトを生成します。",
+  "version": "0.1.2",
+  "description": "Scaffold a Cloudflare Workers + Ruby project from the official template.",
   "license": "MIT",
   "type": "module",
   "bin": {
-    "create-hibana": "./dist/index.js"
+    "create-hibana": "dist/index.js"
   },
   "files": [
     "dist"
   ],
   "main": "dist/index.js",
+  "keywords": [
+    "cloudflare",
+    "workers",
+    "ruby",
+    "cli",
+    "scaffolding"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hiroeorz/hibana.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hiroeorz/hibana/issues"
+  },
+  "homepage": "https://github.com/hiroeorz/hibana#readme",
+  "author": "Hibana Contributors",
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",

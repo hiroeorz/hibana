@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -104,7 +105,15 @@ function handleCliError(error: unknown) {
 /** エントリーポイント */
 function shouldExecuteCli(): boolean {
   const entryPath = fileURLToPath(import.meta.url);
-  return process.argv[1] === entryPath;
+  const invokedPath = process.argv.length > 1 ? process.argv[1] : null;
+  if (!invokedPath) {
+    return false;
+  }
+  try {
+    return realpathSync(invokedPath) === realpathSync(entryPath);
+  } catch {
+    return false;
+  }
 }
 
 if (shouldExecuteCli()) {
