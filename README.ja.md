@@ -51,12 +51,9 @@ end
 
 ### Workers AI 連携
 
-### Workers AI
+Workers AI との連携もできます。渡すパラメータはモデルによって異なるので注意してください。
 
-You can also integrate with Workers AI. Each model expects different payload fields, so adjust the arguments accordingly.
-
-Sample using `@cf/meta/llama-3.1-8b-instruct-fast`:
-
+LLMに `@cf/meta/llama-3.1-8b-instruct-fast` を使う場合のサンプル。
 ```ruby
 get "/ai-demo-llama" do |c|
   ai = c.env(:AI)
@@ -71,14 +68,13 @@ get "/ai-demo-llama" do |c|
       max_output_tokens: 30,
     },
   )
-  c.json({ prompt: prompt, result: result })
+  c.json({prompt: prompt, result: result})
 rescue WorkersAI::Error => e
   c.json({ error: e.message, details: e.details }, status: 500)
 end
 ```
 
-Sample using `@cf/openai/gpt-oss-20b`:
-
+LLMに `gpt-oss-20b` を使う場合のサンプル。
 ```ruby
 get "/ai-demo-gpt-oss" do |c|
   ai = c.env(:AI)
@@ -91,11 +87,11 @@ get "/ai-demo-gpt-oss" do |c|
       input: prompt,
       reasoning: {
         effort: "low",
-        summary: "auto",
-      },
+        summary: "auto"
+      }
     },
   )
-  c.json({ prompt: prompt, result: result })
+  c.json({prompt: prompt, result: result})
 rescue WorkersAI::Error => e
   c.json({ error: e.message, details: e.details }, status: 500)
 end
