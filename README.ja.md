@@ -49,6 +49,58 @@ get "/r2" do |c|
 end
 ```
 
+### Workers AI 連携
+
+### Workers AI
+
+You can also integrate with Workers AI. Each model expects different payload fields, so adjust the arguments accordingly.
+
+Sample using `@cf/meta/llama-3.1-8b-instruct-fast`:
+
+```ruby
+get "/ai-demo-llama" do |c|
+  ai = c.env(:AI)
+  prompt = "What is Cloudflare Workers AI ?"
+  model = "@cf/meta/llama-3.1-8b-instruct-fast"
+
+  result = ai.run(
+    model: model,
+    payload: {
+      prompt: prompt,
+      temperature: 0.8,
+      max_output_tokens: 30,
+    },
+  )
+  c.json({ prompt: prompt, result: result })
+rescue WorkersAI::Error => e
+  c.json({ error: e.message, details: e.details }, status: 500)
+end
+```
+
+Sample using `@cf/openai/gpt-oss-20b`:
+
+```ruby
+get "/ai-demo-gpt-oss" do |c|
+  ai = c.env(:AI)
+  prompt = "What is Cloudflare Workers AI ?"
+  model = "@cf/openai/gpt-oss-20b"
+
+  result = ai.run(
+    model: model,
+    payload: {
+      input: prompt,
+      reasoning: {
+        effort: "low",
+        summary: "auto",
+      },
+    },
+  )
+  c.json({ prompt: prompt, result: result })
+rescue WorkersAI::Error => e
+  c.json({ error: e.message, details: e.details }, status: 500)
+end
+```
+
 ---
 
 ## 使い方
