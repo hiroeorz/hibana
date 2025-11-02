@@ -7,6 +7,10 @@ Hibanaは、Cloudflare Workers + Ruby構成のテンプレートを手早く取�
 
 注意： 本アプリケーションはアルファ段階です。
 
+本ソフトウェアは、Cloudflare Workers上で動作するRubyのプロジェクトテンプレートを生成する機能のみ提供します。
+Cloudflare Workers 上でどのような仕組みでRubyプログラムが動作するのか知りたい場合は、[テンプレート（hiroeorz
+cloudflare_workers_ruby_template）](https://github.com/hiroeorz/cloudflare_workers_ruby_template/)の `README.md` や `docs` 以下のドキュメントをご覧ください。
+
 ---
 
 ## 目標
