@@ -8,7 +8,8 @@ Running `npm create hibana@latest <project-name>` clones the template, initializ
 > This CLI is currently in alpha.
 
 This CLI only scaffolds the Ruby project template that runs on Cloudflare Workers.
-If you want to learn how Ruby executes on Workers in detail, see the template repository’s [`README.md`](https://github.com/hiroeorz/cloudflare_workers_ruby_template/) and the documents under `docs/`.
+If you want to learn how Ruby executes on Workers in detail, see the template repository’s [template (hiroeorz
+cloudflare_workers_ruby_template)](https://github.com/hiroeorz/cloudflare_workers_ruby_template/) `README.md` and the documents under `docs/`.
 
 ---
 
