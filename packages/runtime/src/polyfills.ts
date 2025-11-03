@@ -35,9 +35,14 @@ const allowedFunctionBodies = new Map<string, (...fnArgs: unknown[]) => unknown>
   ["return undefined", (..._args: unknown[]) => undefined],
   ["return null", (..._args: unknown[]) => null],
   ["return true;", (..._args: unknown[]) => true],
+  ["return true", (..._args: unknown[]) => true],
   ["return false;", (..._args: unknown[]) => false],
-  // js gem が配列を変換するために利用する
+  ["return false", (..._args: unknown[]) => false],
+  // js gem が配列やHashを変換するために利用する
   ["return []", (..._args: unknown[]) => []],
+  ["return [];", (..._args: unknown[]) => []],
+  ["return {}", (..._args: unknown[]) => ({})],
+  ["return {};", (..._args: unknown[]) => ({})],
 ])
 
 if (typeof globalThis.Function === "function") {
@@ -46,10 +51,22 @@ if (typeof globalThis.Function === "function") {
   const FunctionStub = function (...args: string[]): (...fnArgs: unknown[]) => unknown {
     if (args.length > 0) {
       const body = args[args.length - 1]
-      const handler = allowedFunctionBodies.get(body)
+      const trimmed = body.trim()
+      const candidates = [body, trimmed, trimmed.endsWith(";") ? trimmed.slice(0, -1) : trimmed]
+      let handler: ((...fnArgs: unknown[]) => unknown) | undefined
+      for (const candidate of candidates) {
+        handler = allowedFunctionBodies.get(candidate)
+        if (handler) {
+          break
+        }
+      }
       if (handler) {
         return handler
       }
+      console.warn(
+        "[hibana-runtime] Blocked new Function call with body:",
+        body,
+      )
     }
     throw new Error("Dynamic code generation is not permitted")
   }
