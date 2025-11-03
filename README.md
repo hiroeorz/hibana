@@ -7,6 +7,8 @@ Running `npm create hibana@latest <project-name>` clones the template, initializ
 
 > This CLI is currently in alpha.
 
+The shared runtime (Ruby/TypeScript bridge and Cloudflare client wrappers) lives in a separate package, `@hibana-apps/runtime`. Generated projects depend on it, and you can pick up updates later with `npm install @hibana-apps/runtime@latest`.
+
 This CLI only scaffolds the Ruby project template that runs on Cloudflare Workers.
 If you want to learn how Ruby executes on Workers in detail, see the template repository’s [template (hiroeorz
 cloudflare_workers_ruby_template)](https://github.com/hiroeorz/cloudflare_workers_ruby_template/) `README.md` and the documents under `docs/`.
@@ -135,6 +137,8 @@ cd <project-name>
 npm install
 ```
 
+The generated `package.json` already includes `@hibana-apps/runtime`. To follow runtime updates after project creation, run `npm install @hibana-apps/runtime@latest` whenever needed.
+
 Start the development server:
 
 ```bash
@@ -156,36 +160,81 @@ Refer to the generated project’s `README.md` for further template details.
 
 ## Developer Guide
 
-### Repository Layout
+### Workspace Layout
 
 ```
-src/
-  config-editor.ts  # Updates configuration files after extraction
-  constants.ts      # Default values related to the template
-  errors.ts         # Custom errors used by the CLI
-  index.ts          # CLI entry point
-  template.ts       # Template fetch logic built on top of degit
-  ui.ts             # Progress and error output
-tests/
-  cli.e2e.test.ts   # CLI end-to-end tests (degit mocked)
-  config-editor.test.ts
-  template.test.ts
-types/
-  degit.d.ts        # Type definition for degit
+packages/
+  cli/              # CLI implementation (create-hibana)
+    src/            # Commands and helpers
+    tests/          # Vitest unit + E2E tests
+  runtime/          # Shared runtime (@hibana-apps/runtime)
+    src/            # TypeScript + Ruby bridge assets
+    tests/          # Runtime-level unit tests
 ```
 
-### Development Commands
+The repository uses npm workspaces. A single `npm install` at the root resolves dependencies for both packages.
+
+### Common Scripts
 
 ```bash
-npm run build       # Bundle with tsup
-npm run lint        # ESLint
-npm run typecheck   # TypeScript type checking
-npm run test        # Vitest (unit + E2E)
-npm run dev         # tsup watch mode
+# Install dependencies (root)
+npm install
+
+# CLI
+npm run build --workspace create-hibana
+npm run test  --workspace create-hibana
+npm run lint  --workspace create-hibana
+npm run typecheck --workspace create-hibana
+
+# Runtime
+npm run build --workspace @hibana-apps/runtime
+npm run test  --workspace @hibana-apps/runtime
+npm run typecheck --workspace @hibana-apps/runtime
 ```
 
-`npm run build` generates `dist/index.js`; run it with `node dist/index.js <project-name>`.  
-You can also `npm link` to test the full `npm create hibana` flow locally.
+Running `npm run build` at the workspace root invokes `build` for each package in order, so both CLI and runtime artifacts are refreshed together.
+
+### Testing the CLI locally
+
+1. Install dependencies and build both packages:
+   ```bash
+   npm install
+   npm run build --workspace @hibana-apps/runtime
+   npm run build --workspace create-hibana
+   ```
+2. Link the CLI globally:
+   ```bash
+   (cd packages/cli && npm link)
+   ```
+3. Execute `create-hibana <project-name>` anywhere to scaffold using your local changes.  
+   When finished, run `npm unlink -g create-hibana` and `(cd packages/cli && npm unlink)` to remove the link.
+
+### Publishing to npm
+
+1. Publish the runtime:
+   ```bash
+   npm run build --workspace @hibana-apps/runtime
+   cd packages/runtime
+   npm publish --access public
+   cd ../..
+   ```
+   > Ensure you’re logged in with npm credentials that have access to the `hibana-apps` org.
+
+2. Publish the CLI:
+   - Update `packages/cli/src/constants.ts` so `RUNTIME_PACKAGE_VERSION` matches the released runtime.
+   - Bump `packages/cli/package.json`’s `version`.
+   - Reinstall deps and run tests/build:
+     ```bash
+     npm install
+     npm run test --workspace create-hibana
+     npm run build --workspace create-hibana
+     ```
+   - Publish:
+     ```bash
+     cd packages/cli
+     npm publish --access public
+     cd ../..
+     ```
 
 ---
 
