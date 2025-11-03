@@ -7,3 +7,9 @@ export const DEFAULT_TEMPLATE_REF = "main";
 
 /** テンプレート取得時のタイムアウト（ミリ秒） */
 export const TEMPLATE_DOWNLOAD_TIMEOUT = 1000 * 60;
+
+/** 生成プロジェクトに追加するランタイムパッケージ */
+export const RUNTIME_PACKAGE_NAME = "@hibana-apps/runtime";
+
+/** ランタイムパッケージの推奨バージョン */
+export const RUNTIME_PACKAGE_VERSION = "^0.1.0";

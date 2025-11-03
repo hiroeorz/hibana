@@ -1,57 +1,23 @@
 {
-  "name": "create-hibana",
-  "version": "0.1.3",
-  "description": "Scaffold a Cloudflare Workers + Ruby project from the official template.",
-  "license": "MIT",
-  "type": "module",
-  "bin": {
-    "create-hibana": "dist/index.js"
-  },
-  "files": [
-    "dist"
+  "name": "hibana",
+  "private": true,
+  "workspaces": [
+    "packages/*"
   ],
-  "main": "dist/index.js",
-  "keywords": [
-    "cloudflare",
-    "workers",
-    "ruby",
-    "cli",
-    "scaffolding"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/hiroeorz/hibana.git"
-  },
-  "bugs": {
-    "url": "https://github.com/hiroeorz/hibana/issues"
-  },
-  "homepage": "https://github.com/hiroeorz/hibana#readme",
-  "author": "Hibana Contributors",
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
-    "lint": "eslint .",
-    "test": "vitest run",
-    "test:watch": "vitest watch",
-    "typecheck": "tsc --noEmit"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  },
-  "dependencies": {
-    "@iarna/toml": "^2.2.5",
-    "commander": "^12.1.0",
-    "degit": "^2.8.4",
-    "kleur": "^4.1.5"
+    "build": "npm run build --workspaces",
+    "test": "npm run test --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "lint": "npm run lint --workspace create-hibana"
   },
   "devDependencies": {
     "@types/node": "^20.12.7",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
     "eslint": "^8.57.0",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-n": "^17.9.0",
     "eslint-plugin-promise": "^6.1.1",
-    "@typescript-eslint/eslint-plugin": "^7.18.0",
-    "@typescript-eslint/parser": "^7.18.0",
     "prettier": "^3.2.5",
     "tsup": "^8.0.1",
     "typescript": "^5.4.5",

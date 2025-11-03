@@ -7,13 +7,6 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-    "resolveJsonModule": true,
-    "outDir": "dist",
-    "rootDir": "."
-  },
-  "include": [
-    "src",
-    "tests",
-    "types"
-  ]
+    "resolveJsonModule": true
+  }
 }

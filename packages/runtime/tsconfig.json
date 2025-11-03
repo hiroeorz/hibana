@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowArbitraryExtensions": true
+  },
+  "include": [
+    "src"
+  ],
+  "files": [
+    "src/globals.d.ts"
+  ]
+}

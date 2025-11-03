@@ -1,6 +1,10 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { stringify as toToml, parse as parseToml } from "@iarna/toml";
+import {
+  RUNTIME_PACKAGE_NAME,
+  RUNTIME_PACKAGE_VERSION,
+} from "./constants.js";
 import { ConfigUpdateError } from "./errors.js";
 
 /** 設定ファイル更新時に必要な情報 */
@@ -25,6 +29,10 @@ async function updatePackageJson(options: ConfigUpdateOptions) {
     const raw = await readFile(path, "utf8");
     const json = JSON.parse(raw) as Record<string, unknown>;
     json.name = options.projectName;
+    const dependencies =
+      (json.dependencies as Record<string, unknown> | undefined) ?? {};
+    dependencies[RUNTIME_PACKAGE_NAME] = RUNTIME_PACKAGE_VERSION;
+    json.dependencies = dependencies;
     const updated = JSON.stringify(json, null, 2);
     await writeFile(path, `${updated}\n`, "utf8");
   } catch (error) {

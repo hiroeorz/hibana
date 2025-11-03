@@ -1,0 +1,59 @@
+{
+  "name": "@hibana-apps/runtime",
+  "version": "0.1.0",
+  "description": "Shared runtime bridge for Hibana-generated Cloudflare Workers + Ruby projects.",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./runtime": {
+      "types": "./dist/ruby-runtime.d.ts",
+      "import": "./dist/ruby-runtime.js"
+    },
+    "./ruby-runtime": {
+      "types": "./dist/ruby-runtime.d.ts",
+      "import": "./dist/ruby-runtime.js"
+    },
+    "./polyfills": {
+      "types": "./dist/polyfills.d.ts",
+      "import": "./dist/polyfills.js"
+    },
+    "./helper-registry": {
+      "types": "./dist/helper-registry.d.ts",
+      "import": "./dist/helper-registry.js"
+    },
+    "./script-registry": {
+      "types": "./dist/script-registry.d.ts",
+      "import": "./dist/script-registry.js"
+    },
+    "./http-fetch-utils": {
+      "types": "./dist/http-fetch-utils.d.ts",
+      "import": "./dist/http-fetch-utils.js"
+    },
+    "./ruby/app/hibana/*": "./dist/ruby/app/hibana/*"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "copy:ruby": "node ./scripts/copy-ruby-assets.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@ruby/3.4-wasm-wasi": "2.7.2",
+    "@ruby/wasm-wasi": "2.7.2"
+  }
+}

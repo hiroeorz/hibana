@@ -4,6 +4,10 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { updateConfigs } from "../src/config-editor.js";
 import { ConfigUpdateError } from "../src/errors.js";
+import {
+  RUNTIME_PACKAGE_NAME,
+  RUNTIME_PACKAGE_VERSION,
+} from "../src/constants.js";
 
 const createdDirs: string[] = [];
 
@@ -51,6 +55,9 @@ describe("updateConfigs", () => {
 
     expect(updatedPackage.name).toBe("my-app");
     expect(updatedWrangler).toContain('name = "my-app"');
+    expect(
+      (updatedPackage.dependencies ?? {})[RUNTIME_PACKAGE_NAME]
+    ).toBe(RUNTIME_PACKAGE_VERSION);
   });
 
   it("wrangler.tomlが存在しない場合でも成功する", async () => {
