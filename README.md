@@ -153,7 +153,11 @@ end
 
 ```ruby
 get "/legacy" do |c|
-  c.redirect("/new-home", status: 301)
+  c.redirect("/new-home")
+end
+
+get "/docs" do |c|
+  c.redirect("/docs/latest", status: 301)
 end
 ```
 
