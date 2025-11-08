@@ -127,6 +127,15 @@ rescue WorkersAI::Error => e
 end
 ```
 
+
+### リダイレクト
+
+```ruby
+get "/legacy" do |c|
+  c.redirect("/new-home", status: 301)
+end
+```
+
 ### テンプレートレンダリング（ERB）
 
 生成されたプロジェクトには `templates/` ディレクトリがあり、ERB テンプレートを配置すると `RequestContext#render` で描画できます。レイアウトは `templates/layouts/` 以下に置き、既定では `layouts/application.html.erb` が自動的に適用されます。
@@ -291,3 +300,11 @@ npm run typecheck --workspace @hibana-apps/runtime
 MIT License
 
 ---
+
+### リダイレクト
+
+```ruby
+get "/legacy" do |c|
+  c.redirect("/new-home", status: 301)
+end
+```

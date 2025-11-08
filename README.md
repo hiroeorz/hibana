@@ -149,6 +149,14 @@ Hibana.configure do |config|
 end
 ```
 
+### Redirects
+
+```ruby
+get "/legacy" do |c|
+  c.redirect("/new-home", status: 301)
+end
+```
+
 ---
 
 ## Usage

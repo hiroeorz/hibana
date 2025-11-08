@@ -101,6 +101,18 @@ class RequestContext
     Response.new(body: body, status: status, headers: HTML_HEADERS.merge(headers || {}))
   end
 
+  def redirect(location, status: 302, headers: {})
+    raise ArgumentError, "location is required" if location.nil? || location.to_s.empty?
+
+    normalized_status = status.nil? ? 302 : status.to_i
+    redirect_headers = { "Location" => location.to_s }
+    Response.new(
+      body: "",
+      status: normalized_status,
+      headers: redirect_headers.merge(headers || {}),
+    )
+  end
+
   def render(template, locals: nil, layout: :default, status: nil, headers: {}, **implicit_locals)
     body = render_to_string(template, locals: locals, layout: layout, **implicit_locals)
     Response.new(
