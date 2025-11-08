@@ -233,6 +233,30 @@ npm run typecheck --workspace @hibana-apps/runtime
    ```
 3. 任意の場所で `create-hibana <project-name>` を実行すると、ローカル変更を含んだ CLI を使ってテンプレートを生成できます。不要になったら `npm unlink -g create-hibana` と `(cd packages/cli && npm unlink)` で解除してください。
 
+### ランタイム + CLI をローカルで組み合わせて試す
+
+公開前の変更をテンプレート／生成プロジェクトで検証したい場合は、以下の手順で環境を揃えます。
+
+1. **ランタイム（`@hibana-apps/runtime`）のビルド**
+   - `cd ~/src/cloudflare/hibana && npm install`
+   - `npm run build --workspace @hibana-apps/runtime`
+2. **CLI をビルドしてリンク**
+   - `npm run build --workspace create-hibana`
+   - `(cd packages/cli && npm link)` （`create-hibana` コマンドがローカル版になります）
+3. **テンプレートでローカルランタイムを参照**
+   - テンプレートディレクトリへ移動して `npm install`
+   - `npm install ../hibana/packages/runtime`
+4. **ローカル CLI でプロジェクトを生成**
+   - `create-hibana my-app --template hiroeorz/cloudflare_workers_ruby_template`
+   - `cd my-app && npm install`
+   - `npm install ../hibana/packages/runtime`
+5. **開発・検証**
+   - `npm run build:generated`
+   - `npx wrangler dev`
+6. **片付け**
+   - `npm unlink -g create-hibana` と `(cd packages/cli && npm unlink)`
+   - 公開版ランタイムへ戻す場合は `npm install @hibana-apps/runtime@latest`
+
 ### npm への公開フロー
 
 1. ランタイム（`@hibana-apps/runtime`）の公開

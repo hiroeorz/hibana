@@ -42,11 +42,12 @@ def dispatch(method, path, context)
     if block
       normalize_response(block.call(context))
     else
-      Response.new(
-        body: "Ruby Router: Not Found",
-        status: 404,
-        headers: { "content-type" => "text/plain; charset=UTF-8" },
-      )
+      serve_static(path) ||
+        Response.new(
+          body: "Ruby Router: Not Found",
+          status: 404,
+          headers: { "content-type" => "text/plain; charset=UTF-8" },
+        )
     end
 
   JSON.generate(response.payload)
@@ -74,4 +75,15 @@ def report_dispatch_error(error)
   )
 
   JSON.generate(fallback.payload)
+end
+
+def serve_static(path)
+  static_server.call(path)
+rescue => error
+  warn "Static server error: #{error.message}"
+  nil
+end
+
+def static_server
+  @static_server ||= Hibana::StaticServer.new
 end

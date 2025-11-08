@@ -43,6 +43,11 @@ declare module "./ruby/app/hibana/template_renderer.rb" {
   export default content
 }
 
+declare module "./ruby/app/hibana/static_server.rb" {
+  const content: string
+  export default content
+}
+
 declare module "./ruby/app/hibana/workers_ai_client.rb" {
   const content: string
   export default content

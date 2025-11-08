@@ -21,6 +21,13 @@ import {
   setTemplateAssets,
   type TemplateAsset,
 } from "../src/template-registry"
+import {
+  addStaticAsset,
+  clearStaticAssets,
+  getStaticAssets,
+  setStaticAssets,
+  type StaticAsset,
+} from "../src/static-registry"
 
 describe("helper registry", () => {
   const helperA: HelperScript = { filename: "a.rb", source: "puts 'a'" }
@@ -100,5 +107,36 @@ describe("template registry", () => {
     setTemplateAssets([baseTemplate])
     addTemplateAssets([layoutTemplate])
     expect(getTemplateAssets()).toEqual([baseTemplate, layoutTemplate])
+  })
+})
+
+describe("static asset registry", () => {
+  const html: StaticAsset = {
+    filename: "public/index.html",
+    body: "<h1>Hello</h1>",
+    contentType: "text/html",
+  }
+  const image: StaticAsset = {
+    filename: "public/logo.png",
+    body: "binary",
+    contentType: "image/png",
+  }
+
+  beforeEach(() => {
+    clearStaticAssets()
+  })
+
+  it("setStaticAssets replaces stored assets", () => {
+    setStaticAssets([html])
+    expect(getStaticAssets()).toEqual([html])
+
+    setStaticAssets([image])
+    expect(getStaticAssets()).toEqual([image])
+  })
+
+  it("addStaticAsset appends", () => {
+    setStaticAssets([html])
+    addStaticAsset(image)
+    expect(getStaticAssets()).toEqual([html, image])
   })
 })

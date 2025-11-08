@@ -25,6 +25,13 @@ export {
   getTemplateAssets,
   type TemplateAsset,
 } from "./template-registry"
+export {
+  setStaticAssets,
+  addStaticAsset,
+  clearStaticAssets,
+  getStaticAssets,
+  type StaticAsset,
+} from "./static-registry"
 export { handleRequest }
 
 export async function runtimeFetch(

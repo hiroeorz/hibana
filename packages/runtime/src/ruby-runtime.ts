@@ -10,6 +10,7 @@ import d1ClientScript from "./ruby/app/hibana/d1_client.rb"
 import r2ClientScript from "./ruby/app/hibana/r2_client.rb"
 import httpClientScript from "./ruby/app/hibana/http_client.rb"
 import workersAiClientScript from "./ruby/app/hibana/workers_ai_client.rb"
+import staticServerScript from "./ruby/app/hibana/static_server.rb"
 import routingScript from "./ruby/app/hibana/routing.rb"
 import {
   executeHttpFetch,
@@ -19,6 +20,7 @@ import {
 import { getHelperScripts } from "./helper-registry"
 import { getApplicationScripts } from "./script-registry"
 import { getTemplateAssets } from "./template-registry"
+import { getStaticAssets } from "./static-registry"
 
 type HostGlobals = typeof globalThis & {
   tsCallBinding?: (
@@ -87,14 +89,16 @@ async function setupRubyVM(env: Env): Promise<RubyVM> {
       await evalRubyFile(vm, r2ClientScript, "app/hibana/r2_client.rb") // 7. R2クライアント
       await evalRubyFile(vm, httpClientScript, "app/hibana/http_client.rb") // 8. HTTPクライアント
       await evalRubyFile(vm, workersAiClientScript, "app/hibana/workers_ai_client.rb") // 9. Workers AIクライアント
-      await registerTemplates(vm) // 10. テンプレート資材をロード
+      await evalRubyFile(vm, staticServerScript, "app/hibana/static_server.rb") // 10. 静的サーバー
+      await registerTemplates(vm) // 11. テンプレート資材をロード
+      await registerStaticAssets(vm) // 12. 静的アセットをロード
 
-      // 11. app/helpers 以下のファイルを順次読み込み
+      // 13. app/helpers 以下のファイルを順次読み込み
       for (const helper of getHelperScripts()) {
         await evalRubyFile(vm, helper.source, helper.filename) // app/helpers配下
       }
 
-      await evalRubyFile(vm, routingScript, "app/hibana/routing.rb") // 12. ルーティングDSL
+      await evalRubyFile(vm, routingScript, "app/hibana/routing.rb") // 14. ルーティングDSL
 
       for (const script of getApplicationScripts()) {
         await evalRubyFile(vm, script.source, script.filename)
@@ -518,6 +522,25 @@ async function registerTemplates(vm: RubyVM): Promise<void> {
     const filenameLiteral = toRubyStringLiteral(template.filename)
     const sourceLiteral = toRubyStringLiteral(template.source)
     const script = `Hibana::TemplateRegistry.register(${filenameLiteral}, ${sourceLiteral})`
+    await vm.evalAsync(script)
+  }
+}
+
+async function registerStaticAssets(vm: RubyVM): Promise<void> {
+  const assets = getStaticAssets()
+  await vm.evalAsync("Hibana::StaticRegistry.clear")
+
+  if (assets.length === 0) {
+    return
+  }
+
+  for (const asset of assets) {
+    const filenameLiteral = toRubyStringLiteral(asset.filename)
+    const bodyLiteral = toRubyStringLiteral(asset.body)
+    const contentTypeLiteral = asset.contentType
+      ? toRubyStringLiteral(asset.contentType)
+      : "nil"
+    const script = `Hibana::StaticRegistry.register(${filenameLiteral}, ${bodyLiteral}, ${contentTypeLiteral})`
     await vm.evalAsync(script)
   }
 }

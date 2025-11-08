@@ -251,6 +251,31 @@ Running `npm run build` at the workspace root invokes `build` for each package i
 3. Execute `create-hibana <project-name>` anywhere to scaffold using your local changes.  
    When finished, run `npm unlink -g create-hibana` and `(cd packages/cli && npm unlink)` to remove the link.
 
+### Local runtime + CLI workflow
+
+Use these steps when you want to test unpublished changes end-to-end:
+
+1. **Build the runtime (`@hibana-apps/runtime`)**
+   - `cd ~/src/cloudflare/hibana && npm install`
+   - `npm run build --workspace @hibana-apps/runtime`
+2. **Build & link the CLI**
+   - `npm run build --workspace create-hibana`
+   - `(cd packages/cli && npm link)` (now `create-hibana` points to your local CLI)
+3. **Point the template to the local runtime**
+   - `cd <template-dir>`
+   - `npm install`
+   - `npm install ../hibana/packages/runtime`
+4. **Scaffold a project with the linked CLI**
+   - `create-hibana my-app --template hiroeorz/cloudflare_workers_ruby_template`
+   - `cd my-app && npm install`
+   - `npm install ../hibana/packages/runtime`
+5. **Develop & verify**
+   - `npm run build:generated`
+   - `npx wrangler dev`
+6. **Clean up**
+   - `npm unlink -g create-hibana` and `(cd packages/cli && npm unlink)`
+   - Restore the published runtime with `npm install @hibana-apps/runtime@latest`
+
 ### Publishing to npm
 
 1. Publish the runtime:
