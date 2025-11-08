@@ -1,6 +1,6 @@
 {
   "name": "@hibana-apps/runtime",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Shared runtime bridge for Hibana-generated Cloudflare Workers + Ruby projects.",
   "license": "MIT",
   "type": "module",
