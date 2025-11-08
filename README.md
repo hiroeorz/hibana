@@ -107,6 +107,48 @@ rescue WorkersAI::Error => e
 end
 ```
 
+### Template Rendering
+
+Add ERB files under `templates/` (the CLI scaffolds this directory). Layouts live under `templates/layouts/`.
+
+`templates/index.html.erb`
+
+```erb
+<h1>Hello <%= name %></h1>
+<p>Age: <%= age %></p>
+```
+
+`templates/layouts/application.html.erb`
+
+```erb
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Hibana</title>
+  </head>
+  <body>
+    <%= yield %>
+  </body>
+</html>
+```
+
+`routes/app.rb`
+
+```ruby
+get "/" do |c|
+  c.render("index", name: "Hiroe", age: 50)
+end
+```
+
+Pass `layout: false` to skip layouts or `layout: "layouts/marketing"` to render a specific layout. You can also configure template paths upfront:
+
+```ruby
+Hibana.configure do |config|
+  config.template_paths = ["templates", "templates/shared"]
+end
+```
+
 ---
 
 ## Usage

@@ -17,6 +17,14 @@ export {
   getApplicationScripts,
   type RubyScript,
 } from "./script-registry"
+export {
+  setTemplateAssets,
+  addTemplateAsset,
+  addTemplateAssets,
+  clearTemplateAssets,
+  getTemplateAssets,
+  type TemplateAsset,
+} from "./template-registry"
 export { handleRequest }
 
 export async function runtimeFetch(

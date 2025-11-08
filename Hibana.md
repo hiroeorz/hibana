@@ -32,6 +32,13 @@ After the project is generated, users are expected to use the standard `npx wran
 - Print next steps (e.g., `cd <project-name>`, `npm install`, `npm run dev`, `npm run db:migrate`).
 - Defer to Wrangler for all operations after scaffolding.
 
+## Template Rendering (Runtime Support)
+
+- 生成されたプロジェクトに `templates/` ディレクトリを含め、`templates/layouts/application.html.erb` を初期レイアウトとして配置する。
+- ルーティング内では `c.render("index", name: "Hiroe")` のように呼び出し、ERB テンプレートを `RequestContext` から直接描画できる。
+- `Hibana::TemplateRegistry` によってテンプレートソースを登録し、`Hibana.configure` で `template_paths` や `default_layout` をカスタマイズ可能とする。
+- レイアウトは `layout:` オプションで切り替え／無効化できる（`layout: false`）。`render_to_string` も提供し、レスポンス生成以外の用途にも対応する。
+
 ## Non-goals for the Initial Version
 
 - Running Wrangler commands (dev, deploy, migrations) from the CLI.

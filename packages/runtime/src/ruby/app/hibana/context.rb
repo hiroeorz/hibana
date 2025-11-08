@@ -101,6 +101,25 @@ class RequestContext
     Response.new(body: body, status: status, headers: HTML_HEADERS.merge(headers || {}))
   end
 
+  def render(template, locals: nil, layout: :default, status: nil, headers: {}, **implicit_locals)
+    body = render_to_string(template, locals: locals, layout: layout, **implicit_locals)
+    Response.new(
+      body: body,
+      status: status || self.status,
+      headers: HTML_HEADERS.merge(headers || {}),
+    )
+  end
+
+  def render_to_string(template, locals: nil, layout: :default, **implicit_locals)
+    assigns = build_render_assigns(locals, implicit_locals)
+    Hibana::Renderer.render(
+      template,
+      context: self,
+      locals: assigns,
+      layout: layout,
+    )
+  end
+
   def json(data = nil, status: 200, headers: {}, **keyword_data)
     payload = if !keyword_data.empty?
       keyword_data
@@ -220,5 +239,21 @@ class RequestContext
     else
       value
     end
+  end
+
+  def build_render_assigns(explicit_locals, implicit_locals)
+    assigns = {}
+    if explicit_locals
+      unless explicit_locals.respond_to?(:each)
+        raise ArgumentError, "locals must be provided as a hash-like object"
+      end
+      explicit_locals.each do |key, value|
+        assigns[key] = value
+      end
+    end
+    implicit_locals.each do |key, value|
+      assigns[key] = value
+    end
+    assigns
   end
 end

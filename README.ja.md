@@ -127,6 +127,31 @@ rescue WorkersAI::Error => e
 end
 ```
 
+### テンプレートレンダリング（ERB）
+
+生成されたプロジェクトには `templates/` ディレクトリがあり、ERB テンプレートを配置すると `RequestContext#render` で描画できます。レイアウトは `templates/layouts/` 以下に置き、既定では `layouts/application.html.erb` が自動的に適用されます。
+
+```
+templates/
+  index.html.erb
+  layouts/
+    application.html.erb
+```
+
+ルートからの呼び出し例:
+
+```ruby
+get "/" do |c|
+  c.render("index", name: "Hibana", age: 50)
+end
+```
+
+- 拡張子を省略すると `.html.erb` → `.erb` の順で補完します。
+- `layout: false` を指定するとレイアウトをスキップ、`layout: "layouts/marketing"` のように明示すれば任意のレイアウトを利用できます。
+- HTML だけ必要な場合は `render_to_string("users/show", locals: { name: "Hiroe" })` が利用できます。
+
+テンプレートを追加したら `npm run build:generated`（`dev`/`deploy`/`test` 実行前にも自動で呼ばれます）を実行し、`src/generated/template-assets.ts` を最新の状態に保ってください。
+
 ---
 
 
@@ -242,4 +267,3 @@ npm run typecheck --workspace @hibana-apps/runtime
 MIT License
 
 ---
-

@@ -13,6 +13,14 @@ import {
   setApplicationScripts,
   type RubyScript,
 } from "../src/script-registry"
+import {
+  addTemplateAsset,
+  addTemplateAssets,
+  clearTemplateAssets,
+  getTemplateAssets,
+  setTemplateAssets,
+  type TemplateAsset,
+} from "../src/template-registry"
 
 describe("helper registry", () => {
   const helperA: HelperScript = { filename: "a.rb", source: "puts 'a'" }
@@ -57,5 +65,40 @@ describe("application script registry", () => {
     setApplicationScripts([scriptA])
     addApplicationScript(scriptB)
     expect(getApplicationScripts()).toEqual([scriptA, scriptB])
+  })
+})
+
+describe("template registry", () => {
+  const baseTemplate: TemplateAsset = {
+    filename: "templates/index.html.erb",
+    source: "<h1>Hello</h1>",
+  }
+  const layoutTemplate: TemplateAsset = {
+    filename: "templates/layouts/application.html.erb",
+    source: "<%= yield %>",
+  }
+
+  beforeEach(() => {
+    clearTemplateAssets()
+  })
+
+  it("setTemplateAssets replaces the current assets", () => {
+    setTemplateAssets([baseTemplate])
+    expect(getTemplateAssets()).toEqual([baseTemplate])
+
+    setTemplateAssets([layoutTemplate])
+    expect(getTemplateAssets()).toEqual([layoutTemplate])
+  })
+
+  it("addTemplateAsset appends a single template", () => {
+    setTemplateAssets([baseTemplate])
+    addTemplateAsset(layoutTemplate)
+    expect(getTemplateAssets()).toEqual([baseTemplate, layoutTemplate])
+  })
+
+  it("addTemplateAssets appends multiple templates", () => {
+    setTemplateAssets([baseTemplate])
+    addTemplateAssets([layoutTemplate])
+    expect(getTemplateAssets()).toEqual([baseTemplate, layoutTemplate])
   })
 })

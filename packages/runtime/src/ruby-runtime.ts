@@ -3,6 +3,7 @@ import type { RubyVM } from "@ruby/wasm-wasi"
 import rubyWasmAsset from "@ruby/3.4-wasm-wasi/dist/ruby+stdlib.wasm"
 import type { Env } from "./env"
 import hostBridgeScript from "./ruby/app/hibana/host_bridge.rb"
+import templateRendererScript from "./ruby/app/hibana/template_renderer.rb"
 import contextScript from "./ruby/app/hibana/context.rb"
 import kvClientScript from "./ruby/app/hibana/kv_client.rb"
 import d1ClientScript from "./ruby/app/hibana/d1_client.rb"
@@ -17,6 +18,7 @@ import {
 } from "./http-fetch-utils"
 import { getHelperScripts } from "./helper-registry"
 import { getApplicationScripts } from "./script-registry"
+import { getTemplateAssets } from "./template-registry"
 
 type HostGlobals = typeof globalThis & {
   tsCallBinding?: (
@@ -78,19 +80,21 @@ async function setupRubyVM(env: Env): Promise<RubyVM> {
       // 順序が重要
       await evalRubyFile(vm, hostBridgeScript, "app/hibana/host_bridge.rb") // 1. ブリッジ
       registerHostFunctions(vm, env) // 2. ブリッジに関数を登録
-      await evalRubyFile(vm, contextScript, "app/hibana/context.rb") // 3. コンテキスト
-      await evalRubyFile(vm, kvClientScript, "app/hibana/kv_client.rb") // 4. KVクライアント
-      await evalRubyFile(vm, d1ClientScript, "app/hibana/d1_client.rb") // 5. D1クライアント
-      await evalRubyFile(vm, r2ClientScript, "app/hibana/r2_client.rb") // 6. R2クライアント
-      await evalRubyFile(vm, httpClientScript, "app/hibana/http_client.rb") // 7. HTTPクライアント
-      await evalRubyFile(vm, workersAiClientScript, "app/hibana/workers_ai_client.rb") // 8. Workers AIクライアント
+      await evalRubyFile(vm, templateRendererScript, "app/hibana/template_renderer.rb") // 3. テンプレート
+      await evalRubyFile(vm, contextScript, "app/hibana/context.rb") // 4. コンテキスト
+      await evalRubyFile(vm, kvClientScript, "app/hibana/kv_client.rb") // 5. KVクライアント
+      await evalRubyFile(vm, d1ClientScript, "app/hibana/d1_client.rb") // 6. D1クライアント
+      await evalRubyFile(vm, r2ClientScript, "app/hibana/r2_client.rb") // 7. R2クライアント
+      await evalRubyFile(vm, httpClientScript, "app/hibana/http_client.rb") // 8. HTTPクライアント
+      await evalRubyFile(vm, workersAiClientScript, "app/hibana/workers_ai_client.rb") // 9. Workers AIクライアント
+      await registerTemplates(vm) // 10. テンプレート資材をロード
 
-      // 9. app/helpers 以下のファイルを順次読み込み
+      // 11. app/helpers 以下のファイルを順次読み込み
       for (const helper of getHelperScripts()) {
-        await evalRubyFile(vm, helper.source, helper.filename) // 5. app/helpers配下
+        await evalRubyFile(vm, helper.source, helper.filename) // app/helpers配下
       }
 
-      await evalRubyFile(vm, routingScript, "app/hibana/routing.rb") // 10. ルーティングDSL
+      await evalRubyFile(vm, routingScript, "app/hibana/routing.rb") // 12. ルーティングDSL
 
       for (const script of getApplicationScripts()) {
         await evalRubyFile(vm, script.source, script.filename)
@@ -500,4 +504,20 @@ function createUniqueHeredocId(source: string): string {
     base += "_"
   }
   return base
+}
+
+async function registerTemplates(vm: RubyVM): Promise<void> {
+  const templates = getTemplateAssets()
+  await vm.evalAsync("Hibana::TemplateRegistry.clear")
+
+  if (templates.length === 0) {
+    return
+  }
+
+  for (const template of templates) {
+    const filenameLiteral = toRubyStringLiteral(template.filename)
+    const sourceLiteral = toRubyStringLiteral(template.source)
+    const script = `Hibana::TemplateRegistry.register(${filenameLiteral}, ${sourceLiteral})`
+    await vm.evalAsync(script)
+  }
 }
