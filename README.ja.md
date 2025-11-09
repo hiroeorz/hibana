@@ -159,8 +159,30 @@ end
 ```
 templates/
   index.html.erb
-  layouts/
+ layouts/
     application.html.erb
+```
+
+`templates/index.html.erb`
+
+```erb
+<h1>Hello <%= name %></h1>
+<p>Age: <%= age %></p>
+```
+
+`templates/layouts/application.html.erb`
+
+```erb
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Hibana</title>
+  </head>
+  <body>
+    <%= yield %>
+  </body>
+</html>
 ```
 
 ルートからの呼び出し例:
