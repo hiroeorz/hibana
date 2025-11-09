@@ -162,6 +162,13 @@ end
 
 Add ERB files under `templates/` (the CLI scaffolds this directory). Layouts live under `templates/layouts/`.
 
+```
+templates/
+  index.html.erb
+  layouts/
+    application.html.erb
+```
+
 `templates/index.html.erb`
 
 ```erb
