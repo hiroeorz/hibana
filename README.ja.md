@@ -152,6 +152,18 @@ get "/docs" do |c|
 end
 ```
 
+### HTTPクライアント
+
+```ruby
+get "/fetch-example" do |c|
+  http = c.env(:HTTP)
+  response = http.get("https://workers.dev/api/status",
+    headers: { "accept" => "application/json" },
+  )
+  c.json(JSON.parse(response.body))
+end
+```
+
 ### テンプレートレンダリング（ERB）
 
 生成されたプロジェクトには `templates/` ディレクトリがあり、ERB テンプレートを配置すると `RequestContext#render` で描画できます。レイアウトは `templates/layouts/` 以下に置き、既定では `layouts/application.html.erb` が自動的に適用されます。

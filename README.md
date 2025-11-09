@@ -173,6 +173,18 @@ get "/docs" do |c|
 end
 ```
 
+### HTTP Client
+
+```ruby
+get "/fetch-example" do |c|
+  http = c.env(:HTTP)
+  response = http.get("https://workers.dev/api/status",
+    headers: { "accept" => "application/json" },
+  )
+  c.json(JSON.parse(response.body))
+end
+```
+
 ### Route Parameters
 
 Use colon segments to capture parts of the path. Captured values land in `c.params` alongside the query string (path values win on key collisions). Access a single value via `c.path_param(:id)` if you prefer.
