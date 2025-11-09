@@ -161,6 +161,28 @@ get "/docs" do |c|
 end
 ```
 
+### Route Parameters
+
+Use colon segments to capture parts of the path. Captured values land in `c.params` alongside the query string (path values win on key collisions). Access a single value via `c.path_param(:id)` if you prefer.
+
+```ruby
+get "/posts/:id" do |c|
+  c.json(id: c.params[:id])
+end
+```
+
+Use splats for catch-alls or regular expressions for advanced matching.
+
+```ruby
+get "/assets/*path" do |c|
+  c.text("Serving #{c.path_param(:path)}")
+end
+
+get %r{\A/users/(?<id>\d+)\z} do |c|
+  c.text("User ##{c.params['id']}")
+end
+```
+
 ---
 
 ## Usage

@@ -1,5 +1,30 @@
 require "json"
 
+module Hibana
+  module IndifferentAccessHash
+    def [](key)
+      super(convert_key(key))
+    end
+
+    def fetch(key, *args, &block)
+      super(convert_key(key), *args, &block)
+    end
+
+    def key?(key)
+      super(convert_key(key))
+    end
+    alias include? key?
+    alias member? key?
+    alias has_key? key?
+
+    private
+
+    def convert_key(key)
+      key.is_a?(Symbol) ? key.to_s : key
+    end
+  end
+end
+
 class Response
   attr_reader :body, :status, :headers
 
@@ -76,6 +101,7 @@ class RequestContext
 
   def initialize
     @bindings = {}
+    @path_params = {}
   end
 
   def env(binding_name = nil)
@@ -155,7 +181,22 @@ class RequestContext
   def query
     @query ||= {}
   end
-  alias params query
+
+  def params
+    build_params_hash
+  end
+
+  def path_params
+    @path_params.dup.freeze
+  end
+
+  def path_param(name)
+    @path_params[normalize_param_key(name)]
+  end
+
+  def set_path_params(values)
+    @path_params = normalize_shallow_params(values)
+  end
 
   def set_query_from_json(json)
     if json.nil? || json.empty?
@@ -267,5 +308,23 @@ class RequestContext
       assigns[key] = value
     end
     assigns
+  end
+
+  def build_params_hash
+    merged = query.merge(@path_params) { |_key, _old, new| new }
+    merged.extend(Hibana::IndifferentAccessHash)
+    merged.freeze
+  end
+
+  def normalize_shallow_params(values)
+    return {} if values.nil? || values.empty?
+
+    values.each_with_object({}) do |(key, value), acc|
+      acc[key.to_s] = value
+    end
+  end
+
+  def normalize_param_key(key)
+    key.is_a?(Symbol) ? key.to_s : key
   end
 end

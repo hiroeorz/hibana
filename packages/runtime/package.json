@@ -45,7 +45,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "copy:ruby": "node ./scripts/copy-ruby-assets.mjs",
-    "test": "vitest run",
+    "test": "vitest run && ruby ./tests/routing_spec.rb",
     "test:watch": "vitest watch",
     "typecheck": "tsc --noEmit"
   },
