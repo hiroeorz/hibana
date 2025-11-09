@@ -12,4 +12,4 @@ export const TEMPLATE_DOWNLOAD_TIMEOUT = 1000 * 60;
 export const RUNTIME_PACKAGE_NAME = "@hibana-apps/runtime";
 
 /** ランタイムパッケージの推奨バージョン */
-export const RUNTIME_PACKAGE_VERSION = "^0.1.2";
+export const RUNTIME_PACKAGE_VERSION = "^0.1.7";

@@ -1,6 +1,6 @@
 {
   "name": "create-hibana",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Scaffold a Cloudflare Workers + Ruby project from the official template.",
   "license": "MIT",
   "type": "module",
