@@ -48,6 +48,8 @@ npm run dev
 
 ### Hello World
 
+`app/app.rb`
+
 ```ruby
 get "/" do |c|
   c.text("Hello Hibana ⚡")
@@ -55,6 +57,8 @@ end
 ```
 
 ### D1連携
+
+`app/app.rb`
 
 ```ruby
 get "/d1" do |c|
@@ -65,6 +69,8 @@ end
 ```
 
 ### KV連携
+
+`app/app.rb`
 
 ```ruby
 get "/kv" do |c|
@@ -77,6 +83,8 @@ end
 ```
 
 ### R2連携
+
+`app/app.rb`
 
 ```ruby
 get "/r2" do |c|
@@ -96,6 +104,9 @@ end
 Workers AI との連携もできます。渡すパラメータはモデルによって異なるので注意してください。
 
 LLMに `@cf/meta/llama-3.1-8b-instruct-fast` を使う場合のサンプル。
+
+`app/app.rb`
+
 ```ruby
 get "/ai-demo-llama" do |c|
   ai = c.env(:AI)
@@ -117,6 +128,9 @@ end
 ```
 
 LLMに `gpt-oss-20b` を使う場合のサンプル。
+
+`app/app.rb`
+
 ```ruby
 get "/ai-demo-gpt-oss" do |c|
   ai = c.env(:AI)
@@ -142,6 +156,8 @@ end
 
 ### リダイレクト
 
+`app/app.rb`
+
 ```ruby
 get "/legacy" do |c|
   c.redirect("/new-home")
@@ -153,6 +169,8 @@ end
 ```
 
 ### HTTPクライアント
+
+`app/app.rb`
 
 ```ruby
 get "/fetch-example" do |c|
@@ -198,6 +216,8 @@ templates/
 ```
 
 ルートからの呼び出し例:
+
+`app/app.rb`
 
 ```ruby
 get "/" do |c|

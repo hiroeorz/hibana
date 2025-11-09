@@ -53,6 +53,8 @@ npx wrangler dev
 
 ### Hello World
 
+`app/app.rb`
+
 ```ruby
 get "/" do |c|
   c.text("Hello from Ruby WASM")
@@ -60,6 +62,8 @@ end
 ```
 
 ### D1 Integration
+
+`app/app.rb`
 
 ```ruby
 get "/d1" do |c|
@@ -70,6 +74,8 @@ end
 ```
 
 ### KV Integration
+
+`app/app.rb`
 
 ```ruby
 get "/kv" do |c|
@@ -82,6 +88,8 @@ end
 ```
 
 ### R2 Integration
+
+`app/app.rb`
 
 ```ruby
 get "/r2" do |c|
@@ -101,6 +109,8 @@ end
 You can also integrate with Workers AI. Each model expects different payload fields, so adjust the arguments accordingly.
 
 Sample using `@cf/meta/llama-3.1-8b-instruct-fast`:
+
+`app/app.rb`
 
 ```ruby
 get "/ai-demo-llama" do |c|
@@ -123,6 +133,8 @@ end
 ```
 
 Sample using `@cf/openai/gpt-oss-20b`:
+
+`app/app.rb`
 
 ```ruby
 get "/ai-demo-gpt-oss" do |c|
@@ -172,7 +184,7 @@ Add ERB files under `templates/` (the CLI scaffolds this directory). Layouts liv
 </html>
 ```
 
-`routes/app.rb`
+`app/app.rb`
 
 ```ruby
 get "/" do |c|
@@ -190,6 +202,8 @@ end
 
 ### Redirects
 
+`app/app.rb`
+
 ```ruby
 get "/legacy" do |c|
   c.redirect("/new-home")
@@ -201,6 +215,8 @@ end
 ```
 
 ### HTTP Client
+
+`app/app.rb`
 
 ```ruby
 get "/fetch-example" do |c|
@@ -216,6 +232,8 @@ end
 
 Use colon segments to capture parts of the path. Captured values land in `c.params` alongside the query string (path values win on key collisions). Access a single value via `c.path_param(:id)` if you prefer.
 
+`app/app.rb`
+
 ```ruby
 get "/posts/:id" do |c|
   c.json(id: c.params[:id])
@@ -223,6 +241,8 @@ end
 ```
 
 Use splats for catch-alls or regular expressions for advanced matching.
+
+`app/app.rb`
 
 ```ruby
 get "/assets/*path" do |c|
