@@ -22,6 +22,33 @@ cloudflare_workers_ruby_template)](https://github.com/hiroeorz/cloudflare_worker
 
 ---
 
+## Usage
+
+### Create a New Project
+
+```bash
+npm create hibana@latest <project-name>
+```
+
+### Install Dependencies
+
+Move into the generated directory and install dependencies.
+
+```bash
+cd <project-name>
+npm install
+```
+
+The generated `package.json` already includes `@hibana-apps/runtime`. To follow runtime updates after project creation, run `npm install @hibana-apps/runtime@latest` whenever needed.
+
+### Start the Development Server
+
+```bash
+npx wrangler dev
+```
+
+---
+
 ## Code Samples
 
 ### Hello World
@@ -209,15 +236,7 @@ end
 
 ---
 
-## Usage
-
-### Create a New Project
-
-```bash
-npm create hibana@latest <project-name>
-```
-
-### CLI Options
+## CLI Options
 
 | Option | Description | Default |
 | --- | --- | --- |
@@ -225,25 +244,6 @@ npm create hibana@latest <project-name>
 | `--ref <ref>` | Template Git reference (tag / branch / commit) | `main` |
 | `--force` | Overwrite the target directory if it already exists | `false` |
 | `--wrangler-name <name>` | Override the `name` field in `wrangler.toml` | `<project-name>` |
-
----
-
-## Working with the Generated Template
-
-Move into the generated directory and install dependencies.
-
-```bash
-cd <project-name>
-npm install
-```
-
-The generated `package.json` already includes `@hibana-apps/runtime`. To follow runtime updates after project creation, run `npm install @hibana-apps/runtime@latest` whenever needed.
-
-Start the development server:
-
-```bash
-npx wrangler dev
-```
 
 Open http://localhost:8787 to view the starter page.
 
