@@ -47,7 +47,8 @@
     "copy:ruby": "node ./scripts/copy-ruby-assets.mjs",
     "test": "vitest run && ruby ./tests/routing_spec.rb",
     "test:watch": "vitest watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "link:global": "npm link"
   },
   "engines": {
     "node": ">=18.0.0"

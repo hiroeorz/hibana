@@ -5,10 +5,27 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces",
-    "test": "npm run test --workspaces",
+    "deps": "npm install",
+    "build:runtime": "npm run build --workspace @hibana-apps/runtime",
+    "build:cli": "npm run build --workspace create-hibana",
+    "build:all": "npm run deps && npm run build:runtime && npm run build:cli",
+    "build": "npm run build:all",
+    "test:runtime": "npm run test --workspace @hibana-apps/runtime",
+    "test:cli": "npm run test --workspace create-hibana",
+    "test:all": "npm run deps && npm run test:runtime && npm run test:cli",
+    "test": "npm run test:all",
     "typecheck": "npm run typecheck --workspaces",
-    "lint": "npm run lint --workspace create-hibana"
+    "lint": "npm run lint --workspace create-hibana",
+    "link:runtime": "npm run link:global --workspace @hibana-apps/runtime",
+    "link:cli": "npm run link:global --workspace create-hibana",
+    "link:cli-runtime": "npm run link:runtime --workspace create-hibana",
+    "install:local": "npm run build:all && npm run link:runtime && npm run link:cli && npm run link:cli-runtime",
+    "unlink:cli-runtime": "npm run unlink:runtime --workspace create-hibana || true",
+    "unlink:cli-global": "npm unlink -g create-hibana || true",
+    "unlink:runtime-global": "npm unlink -g @hibana-apps/runtime || true",
+    "uninstall:local": "npm run unlink:cli-runtime && npm run unlink:cli-global && npm run unlink:runtime-global",
+    "clean": "rimraf packages/runtime/dist packages/cli/dist",
+    "versions": "node scripts/show-versions.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.12.7",
@@ -21,6 +38,7 @@
     "prettier": "^3.2.5",
     "tsup": "^8.0.1",
     "typescript": "^5.4.5",
-    "vitest": "^1.4.0"
+    "vitest": "^1.4.0",
+    "rimraf": "^5.0.7"
   }
 }

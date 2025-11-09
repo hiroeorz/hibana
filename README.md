@@ -301,92 +301,53 @@ packages/
 
 The repository uses npm workspaces. A single `npm install` at the root resolves dependencies for both packages.
 
-### Common Scripts
+### Build & Test
+
+All commands run from the repository root. You can use npm scripts directly or call the equivalent Make targets.
+
+| Task | npm | make |
+| --- | --- | --- |
+| Install dependencies | `npm run deps` | `make deps` |
+| Build runtime + CLI | `npm run build:all` (alias: `npm run build`) | `make build` |
+| Run all tests | `npm run test:all` (alias: `npm run test`) | `make test` |
+| Clean build artifacts | `npm run clean` | `make clean` |
+| Show package versions | `npm run versions` | `make versions` |
+
+Workspace-specific commands still exist (for example `npm run build:runtime`, `npm run test:cli`, `npm run lint --workspace create-hibana`) when you only need one package.
+
+### Local CLI + Runtime workflow
+
+Use these helpers to try unpublished changes via `npm link`:
+
+- `npm run install:local` (or `make install`)  
+  Builds both packages, links `@hibana-apps/runtime` and `create-hibana` globally, and wires the CLI to the linked runtime. After this, the `create-hibana` command on your PATH will execute the local sources.
+- `npm run uninstall:local` (or `make uninstall`)  
+  Removes the global links and restores your environment.
+
+To verify the runtime inside a generated project, install it from the workspace path inside that project:
 
 ```bash
-# Install dependencies (root)
-npm install
-
-# CLI
-npm run build --workspace create-hibana
-npm run test  --workspace create-hibana
-npm run lint  --workspace create-hibana
-npm run typecheck --workspace create-hibana
-
-# Runtime
-npm run build --workspace @hibana-apps/runtime
-npm run test  --workspace @hibana-apps/runtime
-npm run typecheck --workspace @hibana-apps/runtime
+npm install ../hibana/packages/runtime
 ```
 
-Running `npm run build` at the workspace root invokes `build` for each package in order, so both CLI and runtime artifacts are refreshed together.
-
-### Testing the CLI locally
-
-1. Install dependencies and build both packages:
-   ```bash
-   npm install
-   npm run build --workspace @hibana-apps/runtime
-   npm run build --workspace create-hibana
-   ```
-2. Link the CLI globally:
-   ```bash
-   (cd packages/cli && npm link)
-   ```
-3. Execute `create-hibana <project-name>` anywhere to scaffold using your local changes.  
-   When finished, run `npm unlink -g create-hibana` and `(cd packages/cli && npm unlink)` to remove the link.
-
-### Local runtime + CLI workflow
-
-Use these steps when you want to test unpublished changes end-to-end:
-
-1. **Build the runtime (`@hibana-apps/runtime`)**
-   - `cd ~/src/cloudflare/hibana && npm install`
-   - `npm run build --workspace @hibana-apps/runtime`
-2. **Build & link the CLI**
-   - `npm run build --workspace create-hibana`
-   - `(cd packages/cli && npm link)` (now `create-hibana` points to your local CLI)
-3. **Point the template to the local runtime**
-   - `cd <template-dir>`
-   - `npm install`
-   - `npm install ../hibana/packages/runtime`
-4. **Scaffold a project with the linked CLI**
-   - `create-hibana my-app --template hiroeorz/cloudflare_workers_ruby_template`
-   - `cd my-app && npm install`
-   - `npm install ../hibana/packages/runtime`
-5. **Develop & verify**
-   - `npm run build:generated`
-   - `npx wrangler dev`
-6. **Clean up**
-   - `npm unlink -g create-hibana` and `(cd packages/cli && npm unlink)`
-   - Restore the published runtime with `npm install @hibana-apps/runtime@latest`
+This overrides the published package with your local build while you iterate. Run `npm install @hibana-apps/runtime@latest` in the project when you want to revert.
 
 ### Publishing to npm
 
-1. Publish the runtime:
-   ```bash
-   npm run build --workspace @hibana-apps/runtime
-   cd packages/runtime
-   npm publish --access public
-   cd ../..
-   ```
-   > Ensure you’re logged in with npm credentials that have access to the `hibana-apps` org.
+`make publish` bundles the entire release flow:
 
-2. Publish the CLI:
-   - Update `packages/cli/src/constants.ts` so `RUNTIME_PACKAGE_VERSION` matches the released runtime.
-   - Bump `packages/cli/package.json`’s `version`.
-   - Reinstall deps and run tests/build:
-     ```bash
-     npm install
-     npm run test --workspace create-hibana
-     npm run build --workspace create-hibana
-     ```
-   - Publish:
-     ```bash
-     cd packages/cli
-     npm publish --access public
-     cd ../..
-     ```
+```bash
+make publish VERSION=0.2.0
+```
+
+This command:
+
+1. Verifies the working tree is clean (skip with `ALLOW_DIRTY=1`).
+2. Bumps versions via `scripts/bump-version.mjs` (both packages share `VERSION`; override with `CLI_VERSION` / `RUNTIME_VERSION` when needed).
+3. Runs `npm run deps`, `npm run test:all`, and `npm run build:all`.
+4. Publishes runtime then CLI using `npm publish --tag $(TAG)` (defaults to `latest`, override with `TAG=beta` etc.).
+
+Ensure you’re logged in to npm with credentials that have access to the `hibana-apps` org before running the command.
 
 ---
 

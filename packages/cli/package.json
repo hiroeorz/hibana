@@ -33,7 +33,10 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "link:global": "npm link",
+    "link:runtime": "npm link @hibana-apps/runtime",
+    "unlink:runtime": "npm unlink --no-save @hibana-apps/runtime || true"
   },
   "engines": {
     "node": ">=18.0.0"

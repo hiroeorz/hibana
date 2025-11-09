@@ -304,90 +304,53 @@ packages/
 
 ルートでは npm workspaces を利用しています。`npm install` を一度実行すると、両パッケージの依存がまとめて解決されます。
 
-### 主なスクリプト
+### ビルドとテスト
+
+ルートから npm スクリプトを実行すれば、両ワークスペースをまとめて操作できます。Makefile でも同じ処理を呼び出せます。
+
+| 作業 | npm コマンド | make |
+| --- | --- | --- |
+| 依存インストール | `npm run deps` | `make deps` |
+| 2パッケージのビルド | `npm run build:all`（`npm run build` でも可） | `make build` |
+| 2パッケージのテスト | `npm run test:all`（`npm run test` でも可） | `make test` |
+| 成果物の削除 | `npm run clean` | `make clean` |
+| バージョン確認 | `npm run versions` | `make versions` |
+
+個別に動かしたい場合は `npm run build:runtime` や `npm run test:cli`、`npm run lint --workspace create-hibana` のようにワークスペース宛てのスクリプトを呼んでください。
+
+### ローカル CLI / ランタイム連携
+
+未公開の変更を `npm link` で試す際は次のヘルパーを使います。
+
+- `npm run install:local`（または `make install`）  
+  ランタイムと CLI をビルドし、`@hibana-apps/runtime` / `create-hibana` をグローバルリンクします。さらに CLI 側がリンク済みランタイムを見るよう配線されるため、そのまま `create-hibana` コマンドでローカルソースを試せます。
+- `npm run uninstall:local`（または `make uninstall`）  
+  上記のリンクをすべて解除します。
+
+生成したプロジェクト内でローカルランタイムを使いたい場合は、そのプロジェクトで次を実行してください。
 
 ```bash
-# 依存インストール（ルートで実行）
-npm install
-
-# CLI
-npm run build --workspace create-hibana
-npm run test  --workspace create-hibana
-npm run lint  --workspace create-hibana
-npm run typecheck --workspace create-hibana
-
-# ランタイム
-npm run build --workspace @hibana-apps/runtime
-npm run test  --workspace @hibana-apps/runtime
-npm run typecheck --workspace @hibana-apps/runtime
+npm install ../hibana/packages/runtime
 ```
 
-`npm run build`（ルート）を実行すると、ワークスペース配下の `build` スクリプトが順番に呼び出され、CLI もランタイムも一括ビルドできます。
+検証後は `npm install @hibana-apps/runtime@latest` で公開版へ戻せます。
 
-### ローカルで CLI を試す
+### npm への公開
 
-1. 依存を準備し、CLI とランタイムをビルドします。
-   ```bash
-   npm install
-   npm run build --workspace @hibana-apps/runtime
-   npm run build --workspace create-hibana
-   ```
-2. CLI をグローバルリンクします。
-   ```bash
-   (cd packages/cli && npm link)
-   ```
-3. 任意の場所で `create-hibana <project-name>` を実行すると、ローカル変更を含んだ CLI を使ってテンプレートを生成できます。不要になったら `npm unlink -g create-hibana` と `(cd packages/cli && npm unlink)` で解除してください。
+次のコマンドでリリース作業をまとめて実行できます。
 
-### ランタイム + CLI をローカルで組み合わせて試す
+```bash
+make publish VERSION=0.2.0
+```
 
-公開前の変更をテンプレート／生成プロジェクトで検証したい場合は、以下の手順で環境を揃えます。
+処理内容:
 
-1. **ランタイム（`@hibana-apps/runtime`）のビルド**
-   - `cd ~/src/cloudflare/hibana && npm install`
-   - `npm run build --workspace @hibana-apps/runtime`
-2. **CLI をビルドしてリンク**
-   - `npm run build --workspace create-hibana`
-   - `(cd packages/cli && npm link)` （`create-hibana` コマンドがローカル版になります）
-3. **テンプレートでローカルランタイムを参照**
-   - テンプレートディレクトリへ移動して `npm install`
-   - `npm install ../hibana/packages/runtime`
-4. **ローカル CLI でプロジェクトを生成**
-   - `create-hibana my-app --template hiroeorz/cloudflare_workers_ruby_template`
-   - `cd my-app && npm install`
-   - `npm install ../hibana/packages/runtime`
-5. **開発・検証**
-   - `npm run build:generated`
-   - `npx wrangler dev`
-6. **片付け**
-   - `npm unlink -g create-hibana` と `(cd packages/cli && npm unlink)`
-   - 公開版ランタイムへ戻す場合は `npm install @hibana-apps/runtime@latest`
+1. 作業ツリーがクリーンかを確認（`ALLOW_DIRTY=1` でスキップ可能）。
+2. `scripts/bump-version.mjs` でバージョンを書き換え。`VERSION` を指定すると CLI/ランタイムを同一バージョンに揃えます。片方だけ変えたい場合は `CLI_VERSION` / `RUNTIME_VERSION` を個別指定してください。
+3. `npm run deps`, `npm run test:all`, `npm run build:all` を順に実行。
+4. ランタイム → CLI の順で `npm publish --tag $(TAG)` を実行（既定タグは `latest`。`TAG=beta` などで上書き可能）。
 
-### npm への公開フロー
-
-1. ランタイム（`@hibana-apps/runtime`）の公開
-   ```bash
-   npm run build --workspace @hibana-apps/runtime
-   cd packages/runtime
-   npm publish --access public
-   cd ../..
-   ```
-   ※ npm で `hibana-apps` 組織に権限を持つアカウントでログインしている必要があります。
-
-2. CLI（`create-hibana`）の公開
-   1. `packages/cli/src/constants.ts` の `RUNTIME_PACKAGE_VERSION` を公開したランタイムのバージョンに合わせます。
-   2. `packages/cli/package.json` の `version` を必要に応じて上げます。
-   3. 依存解決とテスト／ビルドを実行します。
-      ```bash
-      npm install
-      npm run test --workspace create-hibana
-      npm run build --workspace create-hibana
-      ```
-   4. 公開します。
-      ```bash
-      cd packages/cli
-      npm publish --access public
-      cd ../..
-      ```
+事前に `hibana-apps` 組織へ publish できるアカウントで `npm login` しておいてください。
 
 ---
 
