@@ -64,6 +64,18 @@ get "/d1" do |c|
 end
 ```
 
+### KV連携
+
+```ruby
+get "/kv" do |c|
+  store = c.env(:MY_KV)
+  key = "greeting"
+  store.put(key, "Hello from KV!")
+  value = store.get(key)
+  c.text("Stored value: #{value}")
+end
+```
+
 ### R2連携
 
 ```ruby
