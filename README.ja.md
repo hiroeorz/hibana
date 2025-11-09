@@ -182,6 +182,32 @@ get "/fetch-example" do |c|
 end
 ```
 
+### ルートパラメータ
+
+コロン付きセグメントでパスの一部をキャプチャできます。取得した値はクエリーパラメータと同じ `c.params` に入り、キーが衝突した場合はパス側が優先されます。単一の値だけ欲しい場合は `c.path_param(:id)` を利用できます。
+
+`app/app.rb`
+
+```ruby
+get "/posts/:id" do |c|
+  c.json(id: c.params[:id])
+end
+```
+
+ワイルドカード（`*path`）や正規表現でも柔軟にマッチングできます。
+
+`app/app.rb`
+
+```ruby
+get "/assets/*path" do |c|
+  c.text("Serving #{c.path_param(:path)}")
+end
+
+get %r{\A/users/(?<id>\d+)\z} do |c|
+  c.text("User ##{c.params['id']}")
+end
+```
+
 ### テンプレートレンダリング（ERB）
 
 生成されたプロジェクトには `templates/` ディレクトリがあり、ERB テンプレートを配置すると `RequestContext#render` で描画できます。レイアウトは `templates/layouts/` 以下に置き、既定では `layouts/application.html.erb` が自動的に適用されます。
