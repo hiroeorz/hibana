@@ -1,5 +1,6 @@
 import "./polyfills"
-import { handleRequest } from "./ruby-runtime"
+import { handleRequest, handleScheduled } from "./ruby-runtime"
+import type { RuntimeScheduledEvent } from "./ruby-runtime"
 import type { Env } from "./env"
 
 export type { Env }
@@ -32,7 +33,12 @@ export {
   getStaticAssets,
   type StaticAsset,
 } from "./static-registry"
-export { handleRequest }
+export { handleRequest, handleScheduled }
+export type { RuntimeScheduledEvent }
+
+interface ExecutionContextLike {
+  waitUntil(promise: Promise<unknown>): void
+}
 
 export async function runtimeFetch(
   request: Request,
@@ -54,6 +60,18 @@ export async function runtimeFetch(
   }
 }
 
-const runtime = { fetch: runtimeFetch }
+export async function runtimeScheduled(
+  event: RuntimeScheduledEvent,
+  env: Env,
+  ctx?: ExecutionContextLike,
+): Promise<void> {
+  const cronPromise = handleScheduled(env, event)
+  if (ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil(cronPromise)
+  }
+  await cronPromise
+}
+
+const runtime = { fetch: runtimeFetch, scheduled: runtimeScheduled }
 
 export default runtime

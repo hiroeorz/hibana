@@ -158,6 +158,34 @@ rescue WorkersAI::Error => e
 end
 ```
 
+### Scheduled Cron Events
+
+Configure Cloudflare Workers cron triggers in `wrangler.toml`, then register handlers in Ruby using the `cron` DSL. Wrangler still controls the actual schedule; Ruby only decides what to do when each cron fires.
+
+`wrangler.toml`
+
+```toml
+[triggers]
+crons = ["0 0 * * *", "0 12 * * *"]
+```
+
+`app/app.rb`
+
+```ruby
+cron "0 0 * * *" do |event, ctx|
+  ctx.env(:KV).put("nightly_report", generate_report(event.scheduled_time))
+end
+
+cron "*" do |event, _ctx|
+  puts "Received cron event: #{event.cron}"
+end
+```
+
+- Handlers are evaluated in the order they are defined. All matching handlers run, so you can pair specific jobs with a final `cron "*"` fallback.
+- Each handler receives the Cloudflare cron metadata (`event.cron`, `event.scheduled_time`, `event.retry_count`, etc.) and a `ScheduledContext`, which exposes the same `env(:KV)`, `json`, and other helpers available in HTTP routes.
+- If Workers triggers execute a cron expression that has no Ruby handler, the runtime logs a warning every time that event fires to help you spot missing definitions.
+- The default runtime export already exposes a `scheduled` entry point, so `export default runtime` wires cron events automatically. If you assemble handlers manually, call `runtimeScheduled(event, env, ctx)` yourself.
+
 ### Template Rendering
 
 Add ERB files under `templates/` (the CLI scaffolds this directory). Layouts live under `templates/layouts/`.

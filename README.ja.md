@@ -153,6 +153,34 @@ rescue WorkersAI::Error => e
 end
 ```
 
+### スケジュール済み Cron イベント
+
+Cloudflare Workers の Cron 発火タイミングは `wrangler.toml` の `[triggers].crons` に列挙します。Ruby 側では `cron` DSL で処理を定義します。
+
+`wrangler.toml`
+
+```toml
+[triggers]
+crons = ["0 0 * * *", "0 12 * * *"]
+```
+
+`app/app.rb`
+
+```ruby
+cron "0 0 * * *" do |event, ctx|
+  ctx.env(:KV).put("nightly_report", generate_report(event.scheduled_time))
+end
+
+cron "*" do |event, _ctx|
+  puts "Cron event: #{event.cron}"
+end
+```
+
+- ハンドラは宣言順に判定され、マッチしたものはすべて実行されます。最後に `cron "*"` を置けばフォールバックとして利用できます。
+- ブロックの第1引数 `event` には Workers から渡されたメタデータ（`event.cron`, `event.scheduled_time`, `event.retry_count` など）が入り、第2引数 `ctx` は HTTP ルートと同じ `env(:KV)` などを備えた `ScheduledContext` です。
+- `wrangler.toml` に設定済みなのに Ruby 側にハンドラがない Cron が動くと、毎回警告が表示されるため定義漏れにすぐ気付けます。
+- `export default runtime` と書けば `scheduled` ハンドラも自動的にエクスポートされます。個別に組み立てる場合は `runtimeScheduled(event, env, ctx)` を呼び出してください。
+
 
 ### リダイレクト
 

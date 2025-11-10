@@ -5,6 +5,7 @@ import type { Env } from "./env"
 import hostBridgeScript from "./ruby/app/hibana/host_bridge.rb"
 import templateRendererScript from "./ruby/app/hibana/template_renderer.rb"
 import contextScript from "./ruby/app/hibana/context.rb"
+import cronScript from "./ruby/app/hibana/cron.rb"
 import kvClientScript from "./ruby/app/hibana/kv_client.rb"
 import d1ClientScript from "./ruby/app/hibana/d1_client.rb"
 import r2ClientScript from "./ruby/app/hibana/r2_client.rb"
@@ -43,6 +44,15 @@ interface WorkerResponsePayload {
   body: string
   status: number
   headers: Record<string, string>
+}
+
+export interface RuntimeScheduledEvent {
+  cron: string
+  scheduledTime: number
+  type?: string
+  retryCount?: number
+  noRetry?: boolean
+  [key: string]: unknown
 }
 
 type D1PreparedStatement = {
@@ -84,21 +94,22 @@ async function setupRubyVM(env: Env): Promise<RubyVM> {
       registerHostFunctions(vm, env) // 2. ブリッジに関数を登録
       await evalRubyFile(vm, templateRendererScript, "app/hibana/template_renderer.rb") // 3. テンプレート
       await evalRubyFile(vm, contextScript, "app/hibana/context.rb") // 4. コンテキスト
-      await evalRubyFile(vm, kvClientScript, "app/hibana/kv_client.rb") // 5. KVクライアント
-      await evalRubyFile(vm, d1ClientScript, "app/hibana/d1_client.rb") // 6. D1クライアント
-      await evalRubyFile(vm, r2ClientScript, "app/hibana/r2_client.rb") // 7. R2クライアント
-      await evalRubyFile(vm, httpClientScript, "app/hibana/http_client.rb") // 8. HTTPクライアント
-      await evalRubyFile(vm, workersAiClientScript, "app/hibana/workers_ai_client.rb") // 9. Workers AIクライアント
-      await evalRubyFile(vm, staticServerScript, "app/hibana/static_server.rb") // 10. 静的サーバー
-      await registerTemplates(vm) // 11. テンプレート資材をロード
-      await registerStaticAssets(vm) // 12. 静的アセットをロード
+      await evalRubyFile(vm, cronScript, "app/hibana/cron.rb") // 5. Cron DSL
+      await evalRubyFile(vm, kvClientScript, "app/hibana/kv_client.rb") // 6. KVクライアント
+      await evalRubyFile(vm, d1ClientScript, "app/hibana/d1_client.rb") // 7. D1クライアント
+      await evalRubyFile(vm, r2ClientScript, "app/hibana/r2_client.rb") // 8. R2クライアント
+      await evalRubyFile(vm, httpClientScript, "app/hibana/http_client.rb") // 9. HTTPクライアント
+      await evalRubyFile(vm, workersAiClientScript, "app/hibana/workers_ai_client.rb") // 10. Workers AIクライアント
+      await evalRubyFile(vm, staticServerScript, "app/hibana/static_server.rb") // 11. 静的サーバー
+      await registerTemplates(vm) // 12. テンプレート資材をロード
+      await registerStaticAssets(vm) // 13. 静的アセットをロード
 
-      // 13. app/helpers 以下のファイルを順次読み込み
+      // 14. app/helpers 以下のファイルを順次読み込み
       for (const helper of getHelperScripts()) {
         await evalRubyFile(vm, helper.source, helper.filename) // app/helpers配下
       }
 
-      await evalRubyFile(vm, routingScript, "app/hibana/routing.rb") // 14. ルーティングDSL
+      await evalRubyFile(vm, routingScript, "app/hibana/routing.rb") // 15. ルーティングDSL
 
       for (const script of getApplicationScripts()) {
         await evalRubyFile(vm, script.source, script.filename)
@@ -174,6 +185,49 @@ export async function handleRequest(
       : Number(payload.status ?? 200)
 
   return { body, status, headers }
+}
+
+export async function handleScheduled(
+  env: Env,
+  event: RuntimeScheduledEvent,
+): Promise<void> {
+  const vm = await setupRubyVM(env)
+  const dispatcher = vm.eval("method(:dispatch_scheduled)")
+  const payloadJson = JSON.stringify(buildScheduledPayload(event))
+  const payloadArg = vm.eval(toRubyStringLiteral(payloadJson))
+  const result = await dispatcher.callAsync("call", payloadArg)
+  const serialized =
+    result && typeof result.toString === "function" ? result.toString() : ""
+  if (!serialized) {
+    return
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(serialized)
+  } catch (error) {
+    const reason =
+      error instanceof Error ? error.message : "Unknown JSON parse error"
+    throw new Error(
+      `Failed to parse Ruby cron response payload: ${reason}\nPayload: ${serialized}`,
+    )
+  }
+
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Ruby cron response payload is malformed")
+  }
+
+  const payload = parsed as {
+    status?: string
+    error?: { message?: string }
+  }
+
+  if (payload.status === "error") {
+    const message =
+      payload.error?.message ||
+      "Ruby cron handler failed without an error message"
+    throw new Error(message)
+  }
 }
 
 function registerHostFunctions(vm: RubyVM, env: Env): void {
@@ -441,6 +495,35 @@ function buildQueryObject(
     query[key] = values.length > 1 ? values : values[0] ?? ""
   })
   return query
+}
+
+function buildScheduledPayload(
+  event: RuntimeScheduledEvent,
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    cron: event.cron ?? "",
+  }
+
+  if (typeof event.scheduledTime === "number") {
+    payload.scheduledTime = event.scheduledTime
+    payload.scheduled_time = event.scheduledTime
+  }
+
+  if (event.type !== undefined) {
+    payload.type = event.type
+  }
+
+  if (event.retryCount !== undefined) {
+    payload.retryCount = event.retryCount
+    payload.retry_count = event.retryCount
+  }
+
+  if (event.noRetry !== undefined) {
+    payload.noRetry = event.noRetry
+    payload.no_retry = event.noRetry
+  }
+
+  return payload
 }
 
 async function populateBodyOnContext(
