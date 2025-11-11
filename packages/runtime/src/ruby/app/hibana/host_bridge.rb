@@ -1,6 +1,11 @@
 module HostBridge
   class << self
-    attr_accessor :ts_call_binding, :ts_run_d1_query, :ts_http_fetch, :ts_workers_ai_invoke, :ts_report_ruby_error
+    attr_accessor :ts_call_binding,
+      :ts_run_d1_query,
+      :ts_http_fetch,
+      :ts_workers_ai_invoke,
+      :ts_report_ruby_error,
+      :ts_html_rewriter_transform
 
     def call(binding_name, method_name, *args)
       ensure_call_binding_registered!
@@ -52,6 +57,18 @@ module HostBridge
         raise "Host function 'ts_report_ruby_error' is not registered"
       end
       result = ts_report_ruby_error.apply(request_payload.to_s)
+      if result.respond_to?(:await)
+        result.await
+      else
+        result
+      end
+    end
+
+    def html_rewriter_transform(request_payload)
+      unless ts_html_rewriter_transform
+        raise "Host function 'ts_html_rewriter_transform' is not registered"
+      end
+      result = ts_html_rewriter_transform.apply(request_payload.to_s)
       if result.respond_to?(:await)
         result.await
       else

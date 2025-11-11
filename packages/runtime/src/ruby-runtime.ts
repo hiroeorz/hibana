@@ -13,6 +13,7 @@ import httpClientScript from "./ruby/app/hibana/http_client.rb"
 import workersAiClientScript from "./ruby/app/hibana/workers_ai_client.rb"
 import staticServerScript from "./ruby/app/hibana/static_server.rb"
 import routingScript from "./ruby/app/hibana/routing.rb"
+import htmlRewriterScript from "./ruby/app/hibana/html_rewriter.rb"
 import {
   executeHttpFetch,
   parseHttpRequestPayload,
@@ -22,6 +23,8 @@ import { getHelperScripts } from "./helper-registry"
 import { getApplicationScripts } from "./script-registry"
 import { getTemplateAssets } from "./template-registry"
 import { getStaticAssets } from "./static-registry"
+import { transformHtmlWithRubyHandlers } from "./html-rewriter-bridge"
+import { toRubyStringLiteral } from "./ruby-utils"
 
 type HostGlobals = typeof globalThis & {
   tsCallBinding?: (
@@ -38,6 +41,7 @@ type HostGlobals = typeof globalThis & {
   tsHttpFetch?: (payloadJson: string) => Promise<string>
   tsWorkersAiInvoke?: (payloadJson: string) => Promise<string>
   tsReportRubyError?: (payloadJson: string) => Promise<void>
+  tsHtmlRewriterTransform?: (payloadJson: string) => Promise<string>
 }
 
 interface WorkerResponsePayload {
@@ -101,15 +105,16 @@ async function setupRubyVM(env: Env): Promise<RubyVM> {
       await evalRubyFile(vm, httpClientScript, "app/hibana/http_client.rb") // 9. HTTPクライアント
       await evalRubyFile(vm, workersAiClientScript, "app/hibana/workers_ai_client.rb") // 10. Workers AIクライアント
       await evalRubyFile(vm, staticServerScript, "app/hibana/static_server.rb") // 11. 静的サーバー
-      await registerTemplates(vm) // 12. テンプレート資材をロード
-      await registerStaticAssets(vm) // 13. 静的アセットをロード
+      await evalRubyFile(vm, htmlRewriterScript, "app/hibana/html_rewriter.rb") // 12. HTMLRewriter
+      await registerTemplates(vm) // 13. テンプレート資材をロード
+      await registerStaticAssets(vm) // 14. 静的アセットをロード
 
-      // 14. app/helpers 以下のファイルを順次読み込み
+      // 15. app/helpers 以下のファイルを順次読み込み
       for (const helper of getHelperScripts()) {
         await evalRubyFile(vm, helper.source, helper.filename) // app/helpers配下
       }
 
-      await evalRubyFile(vm, routingScript, "app/hibana/routing.rb") // 15. ルーティングDSL
+      await evalRubyFile(vm, routingScript, "app/hibana/routing.rb") // 16. ルーティングDSL
 
       for (const script of getApplicationScripts()) {
         await evalRubyFile(vm, script.source, script.filename)
@@ -418,6 +423,12 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
     }
   }
 
+  if (typeof host.tsHtmlRewriterTransform !== "function") {
+    host.tsHtmlRewriterTransform = async (payloadJson: string): Promise<string> => {
+      return transformHtmlWithRubyHandlers(vm, payloadJson)
+    }
+  }
+
   if (typeof host.tsReportRubyError !== "function") {
     host.tsReportRubyError = async (payloadJson: string): Promise<void> => {
       try {
@@ -458,6 +469,7 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
   HostBridge.call("ts_http_fetch=", vm.wrap(host.tsHttpFetch))
   HostBridge.call("ts_workers_ai_invoke=", vm.wrap(host.tsWorkersAiInvoke))
   HostBridge.call("ts_report_ruby_error=", vm.wrap(host.tsReportRubyError))
+  HostBridge.call("ts_html_rewriter_transform=", vm.wrap(host.tsHtmlRewriterTransform))
 }
 
 function ensureRecord(
@@ -471,16 +483,6 @@ function ensureRecord(
     return value as Record<string, unknown>
   }
   throw new Error(`Workers AI payload '${label}' must be provided as an object`)
-}
-
-function toRubyStringLiteral(value: string): string {
-  const escaped = value
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"')
-    .replace(/\r/g, "\\r")
-    .replace(/\n/g, "\\n")
-    .replace(/\t/g, "\\t")
-  return `"${escaped}"`
 }
 
 function buildQueryObject(
