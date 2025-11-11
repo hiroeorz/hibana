@@ -118,6 +118,32 @@ response.body
 
 `transform` は Cloudflare Workers のレスポンス互換オブジェクトを返します。既存の `RequestContext#html` や `Response` と組み合わせて使うことも可能です。
 
+#### 基本的な使用例
+
+以下は、`p.highlight` 要素に属性を追加しつつ HTML 片を追記する例です。
+
+```ruby
+rewriter = Hibana::HTMLRewriter.new
+rewriter.on("p.highlight") do |element|
+  element.set_attribute("data-role", "example")
+  element.append("<span>Ruby</span>", html: true)
+end
+
+response = rewriter.transform("<html><body><p class=\"highlight\"></p></body></html>")
+```
+
+#### ドキュメント全体へのハンドラ
+
+`on_document` を使うと、ドキュメントスコープで `<head>` への要素追加などが行えます。
+
+```ruby
+rewriter = Hibana::HTMLRewriter.new
+rewriter.on_document do |document|
+  document.append_to_head('<meta charset="utf-8">', html: true)
+  document.end
+end
+```
+
 ### Workers AI 連携
 
 Workers AI との連携もできます。渡すパラメータはモデルによって異なるので注意してください。
