@@ -69,6 +69,7 @@ class HtmlRewriterSpec < Minitest::Test
       element.remove_class("old")
     end
 
+    rewriter.send(:register_handlers)
     handler_entry = rewriter.send(:serialized_handlers).first
     handler_id = handler_entry.fetch("handler_id")
 
@@ -92,6 +93,8 @@ class HtmlRewriterSpec < Minitest::Test
     assert_equal true, commands[1]["html"]
     assert_equal "remove_class", commands[2].fetch("op")
     assert_equal "old", commands[2].fetch("name")
+  ensure
+    rewriter.send(:cleanup_registered_handlers)
   end
 
   def test_dispatch_handler_handles_document_commands
@@ -103,6 +106,7 @@ class HtmlRewriterSpec < Minitest::Test
       document.end
     end
 
+    rewriter.send(:register_handlers)
     handler_entry = rewriter.send(:serialized_handlers).find { |entry| entry.fetch("type") == "document" }
     handler_id = handler_entry.fetch("handler_id")
 
@@ -115,6 +119,8 @@ class HtmlRewriterSpec < Minitest::Test
     assert_equal "<meta charset=\"utf-8\">", commands[0].fetch("content")
     assert_equal true, commands[0]["html"]
     assert_equal "end", commands[1].fetch("op")
+  ensure
+    rewriter.send(:cleanup_registered_handlers)
   end
 
   def test_transform_raises_on_host_error
@@ -129,5 +135,23 @@ class HtmlRewriterSpec < Minitest::Test
       rewriter.transform("<div></div>")
     end
     assert_includes error.message, "rewrite failed"
+  end
+
+  def test_handlers_are_not_retained_after_transform
+    HostBridge.ts_html_rewriter_transform = HostFunctionStub.new do |_payload|
+      JSON.generate({ ok: true, response: { body: "", status: 200, headers: {} } })
+    end
+
+    rewriter = Hibana::HTMLRewriter.new
+    rewriter.on("span") { |_element| }
+    rewriter.on_document { |_document| }
+
+    registry_before = Hibana::HTMLRewriter.send(:handler_registry).dup
+
+    rewriter.transform("<span></span>")
+
+    registry_after = Hibana::HTMLRewriter.send(:handler_registry)
+
+    assert_equal registry_before, registry_after
   end
 end

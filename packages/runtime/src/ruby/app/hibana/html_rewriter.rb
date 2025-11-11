@@ -11,6 +11,12 @@ module Hibana
         handler_id
       end
 
+      def unregister_handler(handler_id)
+        return unless handler_id
+
+        handler_registry.delete(handler_id.to_s)
+      end
+
       def handler_methods(handler)
         return [] unless handler
 
@@ -135,17 +141,17 @@ module Hibana
 
     def initialize
       @handlers = []
+      @active_handler_ids = []
     end
 
     def on(selector, handler = nil, &block)
       raise ArgumentError, "selector is required" if selector.nil? || selector.to_s.empty?
 
       final_handler = resolve_handler(handler, block, ElementBlockHandler)
-      handler_id = self.class.register_handler(final_handler)
       @handlers << {
         type: :selector,
         selector: selector.to_s,
-        handler_id: handler_id,
+        handler: final_handler,
         methods: self.class.handler_methods(final_handler),
       }
       self
@@ -153,29 +159,57 @@ module Hibana
 
     def on_document(handler = nil, &block)
       final_handler = resolve_handler(handler, block, DocumentBlockHandler)
-      handler_id = self.class.register_handler(final_handler)
       @handlers << {
         type: :document,
-        handler_id: handler_id,
+        handler: final_handler,
         methods: self.class.handler_methods(final_handler),
       }
       self
     end
 
     def transform(input)
-      payload = {
-        "handlers" => serialized_handlers,
-        "input" => serialize_input(input),
-      }
-      response_payload = perform_transform(payload)
-      Response.new(
-        body: response_payload.fetch("body", ""),
-        status: response_payload.fetch("status", 200),
-        headers: stringify_hash(response_payload["headers"]),
-      )
+      with_registered_handlers do
+        payload = {
+          "handlers" => serialized_handlers,
+          "input" => serialize_input(input),
+        }
+        response_payload = perform_transform(payload)
+        Response.new(
+          body: response_payload.fetch("body", ""),
+          status: response_payload.fetch("status", 200),
+          headers: stringify_hash(response_payload["headers"]),
+        )
+      end
     end
 
     private
+
+    def with_registered_handlers
+      register_handlers
+      yield
+    ensure
+      cleanup_registered_handlers
+    end
+
+    def register_handlers
+      @active_handler_ids = []
+      @handlers.each do |definition|
+        handler = definition[:handler]
+        next unless handler
+
+        handler_id = self.class.register_handler(handler)
+        definition[:handler_id] = handler_id
+        @active_handler_ids << handler_id
+      end
+    end
+
+    def cleanup_registered_handlers
+      Array(@active_handler_ids).each do |handler_id|
+        self.class.unregister_handler(handler_id)
+      end
+      @active_handler_ids = []
+      @handlers.each { |definition| definition.delete(:handler_id) }
+    end
 
     def serialized_handlers
       @handlers.map { |definition| serialize_handler(definition) }
