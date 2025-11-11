@@ -5,6 +5,7 @@ import type { Env } from "./env"
 import hostBridgeScript from "./ruby/app/hibana/host_bridge.rb"
 import templateRendererScript from "./ruby/app/hibana/template_renderer.rb"
 import contextScript from "./ruby/app/hibana/context.rb"
+import htmlRewriterScript from "./ruby/app/hibana/html_rewriter.rb"
 import cronScript from "./ruby/app/hibana/cron.rb"
 import kvClientScript from "./ruby/app/hibana/kv_client.rb"
 import d1ClientScript from "./ruby/app/hibana/d1_client.rb"
@@ -38,6 +39,7 @@ type HostGlobals = typeof globalThis & {
   tsHttpFetch?: (payloadJson: string) => Promise<string>
   tsWorkersAiInvoke?: (payloadJson: string) => Promise<string>
   tsReportRubyError?: (payloadJson: string) => Promise<void>
+  tsHtmlRewriterTransform?: (payloadJson: string) => Promise<string>
 }
 
 interface WorkerResponsePayload {
@@ -71,6 +73,57 @@ type WorkersAiPayload = {
   [key: string]: unknown
 }
 
+type HtmlRewriterInputPayload =
+  | {
+      type: "response"
+      body: string
+      status?: number
+      headers?: Record<string, string>
+    }
+  | {
+      type: "string"
+      body: string
+    }
+
+interface HtmlRewriterHandlerDefinitionPayload {
+  type?: string
+  selector?: string
+  handler_id?: string
+  methods?: unknown
+  [key: string]: unknown
+}
+
+interface NormalizedHtmlRewriterHandlerDefinition {
+  type: "selector" | "document"
+  selector?: string
+  handlerId: string
+  methods: Set<string>
+}
+
+type HtmlRewriterEventType =
+  | "element"
+  | "text"
+  | "comments"
+  | "doctype"
+  | "end"
+  | "document"
+
+interface HtmlRewriterCommand {
+  op?: unknown
+  [key: string]: unknown
+}
+
+interface HtmlRewriterCommandResult {
+  commands?: unknown
+  error?: { class?: unknown; message?: unknown }
+}
+
+type HtmlRewriterInvoke = (
+  handlerId: string,
+  eventType: HtmlRewriterEventType,
+  payload: unknown,
+) => HtmlRewriterCommand[]
+
 let rubyVmPromise: Promise<RubyVM> | null = null
 
 async function setupRubyVM(env: Env): Promise<RubyVM> {
@@ -94,22 +147,23 @@ async function setupRubyVM(env: Env): Promise<RubyVM> {
       registerHostFunctions(vm, env) // 2. ブリッジに関数を登録
       await evalRubyFile(vm, templateRendererScript, "app/hibana/template_renderer.rb") // 3. テンプレート
       await evalRubyFile(vm, contextScript, "app/hibana/context.rb") // 4. コンテキスト
-      await evalRubyFile(vm, cronScript, "app/hibana/cron.rb") // 5. Cron DSL
-      await evalRubyFile(vm, kvClientScript, "app/hibana/kv_client.rb") // 6. KVクライアント
-      await evalRubyFile(vm, d1ClientScript, "app/hibana/d1_client.rb") // 7. D1クライアント
-      await evalRubyFile(vm, r2ClientScript, "app/hibana/r2_client.rb") // 8. R2クライアント
-      await evalRubyFile(vm, httpClientScript, "app/hibana/http_client.rb") // 9. HTTPクライアント
-      await evalRubyFile(vm, workersAiClientScript, "app/hibana/workers_ai_client.rb") // 10. Workers AIクライアント
-      await evalRubyFile(vm, staticServerScript, "app/hibana/static_server.rb") // 11. 静的サーバー
-      await registerTemplates(vm) // 12. テンプレート資材をロード
-      await registerStaticAssets(vm) // 13. 静的アセットをロード
+      await evalRubyFile(vm, htmlRewriterScript, "app/hibana/html_rewriter.rb") // 5. HTMLRewriter DSL
+      await evalRubyFile(vm, cronScript, "app/hibana/cron.rb") // 6. Cron DSL
+      await evalRubyFile(vm, kvClientScript, "app/hibana/kv_client.rb") // 7. KVクライアント
+      await evalRubyFile(vm, d1ClientScript, "app/hibana/d1_client.rb") // 8. D1クライアント
+      await evalRubyFile(vm, r2ClientScript, "app/hibana/r2_client.rb") // 9. R2クライアント
+      await evalRubyFile(vm, httpClientScript, "app/hibana/http_client.rb") // 10. HTTPクライアント
+      await evalRubyFile(vm, workersAiClientScript, "app/hibana/workers_ai_client.rb") // 11. Workers AIクライアント
+      await evalRubyFile(vm, staticServerScript, "app/hibana/static_server.rb") // 12. 静的サーバー
+      await registerTemplates(vm) // 13. テンプレート資材をロード
+      await registerStaticAssets(vm) // 14. 静的アセットをロード
 
-      // 14. app/helpers 以下のファイルを順次読み込み
+      // 15. app/helpers 以下のファイルを順次読み込み
       for (const helper of getHelperScripts()) {
         await evalRubyFile(vm, helper.source, helper.filename) // app/helpers配下
       }
 
-      await evalRubyFile(vm, routingScript, "app/hibana/routing.rb") // 15. ルーティングDSL
+      await evalRubyFile(vm, routingScript, "app/hibana/routing.rb") // 16. ルーティングDSL
 
       for (const script of getApplicationScripts()) {
         await evalRubyFile(vm, script.source, script.filename)
@@ -418,6 +472,70 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
     }
   }
 
+  if (typeof host.tsHtmlRewriterTransform !== "function") {
+    host.tsHtmlRewriterTransform = async (payloadJson: string): Promise<string> => {
+      try {
+        const payload = JSON.parse(payloadJson) as {
+          input?: unknown
+          handlers?: unknown
+        }
+        if (typeof HTMLRewriter !== "function") {
+          throw new Error("HTMLRewriter is not available in this environment")
+        }
+        const rewriter = new HTMLRewriter()
+        const invokeHandler = createHtmlRewriterInvoker(vm)
+        const handlerPayloads = Array.isArray(payload?.handlers)
+          ? (payload.handlers as HtmlRewriterHandlerDefinitionPayload[])
+          : []
+        for (const handlerPayload of handlerPayloads) {
+          const normalized = normalizeHtmlRewriterHandlerDefinition(handlerPayload)
+          if (!normalized) {
+            continue
+          }
+          const handlers = buildHtmlRewriterHandlers(normalized, invokeHandler)
+          if (!handlers) {
+            continue
+          }
+          if (normalized.type === "selector") {
+            if (!normalized.selector) {
+              continue
+            }
+            rewriter.on(normalized.selector, handlers)
+          } else {
+            rewriter.onDocument(handlers)
+          }
+        }
+
+        const input = normalizeHtmlRewriterInput(payload?.input)
+        const responseInput = buildResponseFromHtmlRewriterInput(input)
+        const transformedResponse = rewriter.transform(responseInput)
+        const body = await transformedResponse.text()
+        const headers: Record<string, string> = {}
+        transformedResponse.headers.forEach((value, key) => {
+          headers[key] = value
+        })
+        return JSON.stringify({
+          ok: true,
+          response: {
+            body,
+            status: transformedResponse.status,
+            headers,
+          },
+        })
+      } catch (rawError) {
+        const error = rawError instanceof Error ? rawError : new Error(String(rawError))
+        return JSON.stringify({
+          ok: false,
+          error: {
+            message: error.message,
+            name: error.name,
+            stack: error.stack,
+          },
+        })
+      }
+    }
+  }
+
   if (typeof host.tsReportRubyError !== "function") {
     host.tsReportRubyError = async (payloadJson: string): Promise<void> => {
       try {
@@ -457,6 +575,10 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
   HostBridge.call("ts_run_d1_query=", vm.wrap(host.tsRunD1Query))
   HostBridge.call("ts_http_fetch=", vm.wrap(host.tsHttpFetch))
   HostBridge.call("ts_workers_ai_invoke=", vm.wrap(host.tsWorkersAiInvoke))
+  HostBridge.call(
+    "ts_html_rewriter_transform=",
+    vm.wrap(host.tsHtmlRewriterTransform),
+  )
   HostBridge.call("ts_report_ruby_error=", vm.wrap(host.tsReportRubyError))
 }
 
@@ -471,6 +593,580 @@ function ensureRecord(
     return value as Record<string, unknown>
   }
   throw new Error(`Workers AI payload '${label}' must be provided as an object`)
+}
+
+function createHtmlRewriterInvoker(vm: RubyVM): HtmlRewriterInvoke {
+  return (handlerId, eventType, payload) => {
+    const payloadJson = JSON.stringify(payload ?? {})
+    const script = `Hibana::HTMLRewriter.__dispatch_handler(${toRubyStringLiteral(
+      handlerId,
+    )}, ${toRubyStringLiteral(eventType)}, ${toRubyStringLiteral(payloadJson)})`
+    const result = vm.eval(script)
+    const resultJson =
+      result && typeof (result as { toString?: () => string }).toString === "function"
+        ? (result as { toString: () => string }).toString()
+        : String(result)
+    let parsed: HtmlRewriterCommandResult
+    try {
+      parsed = JSON.parse(resultJson) as HtmlRewriterCommandResult
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      throw new Error(`Failed to parse HTMLRewriter handler result: ${reason}`)
+    }
+    if (parsed?.error && typeof parsed.error === "object") {
+      const messageCandidate = (parsed.error as { message?: unknown }).message
+      const message =
+        typeof messageCandidate === "string" && messageCandidate.length > 0
+          ? messageCandidate
+          : "Ruby HTMLRewriter handler failed"
+      throw new Error(message)
+    }
+    const commands = parsed?.commands
+    if (!Array.isArray(commands)) {
+      return []
+    }
+    return commands as HtmlRewriterCommand[]
+  }
+}
+
+function normalizeHtmlRewriterHandlerDefinition(
+  payload: HtmlRewriterHandlerDefinitionPayload | undefined,
+): NormalizedHtmlRewriterHandlerDefinition | null {
+  if (!payload || typeof payload !== "object") {
+    return null
+  }
+  const handlerIdValue = payload.handler_id
+  const handlerId =
+    typeof handlerIdValue === "string" && handlerIdValue.length > 0
+      ? handlerIdValue
+      : null
+  if (!handlerId) {
+    return null
+  }
+  const type: "selector" | "document" =
+    payload.type === "document" ? "document" : "selector"
+  let selector: string | undefined
+  if (type === "selector") {
+    const selectorValue = payload.selector
+    if (typeof selectorValue !== "string" || selectorValue.length === 0) {
+      return null
+    }
+    selector = selectorValue
+  }
+  const methods = new Set<string>()
+  const methodValues = Array.isArray(payload.methods)
+    ? (payload.methods as unknown[])
+    : []
+  for (const method of methodValues) {
+    if (typeof method === "string" && method.length > 0) {
+      methods.add(method)
+    }
+  }
+  if (methods.size === 0) {
+    methods.add(type === "selector" ? "element" : "document")
+  }
+  return { type, selector, handlerId, methods }
+}
+
+function buildHtmlRewriterHandlers(
+  definition: NormalizedHtmlRewriterHandlerDefinition,
+  invoke: HtmlRewriterInvoke,
+): (HTMLRewriterElementHandlers & HTMLRewriterDocumentHandlers) | null {
+  const handlers: Partial<HTMLRewriterElementHandlers & HTMLRewriterDocumentHandlers> = {}
+  const { handlerId, methods } = definition
+  let hasHandler = false
+
+  if (methods.has("element")) {
+    hasHandler = true
+    handlers.element = (element) => {
+      const payload = buildElementPayload(element)
+      const commands = invoke(handlerId, "element", payload)
+      applyElementCommands(element, commands)
+    }
+  }
+
+  if (methods.has("text")) {
+    hasHandler = true
+    handlers.text = (text) => {
+      const payload = buildTextPayload(text)
+      const commands = invoke(handlerId, "text", payload)
+      applyTextCommands(text, commands)
+    }
+  }
+
+  if (methods.has("comments")) {
+    hasHandler = true
+    handlers.comments = (comment) => {
+      const payload = buildCommentPayload(comment)
+      const commands = invoke(handlerId, "comments", payload)
+      applyCommentCommands(comment, commands)
+    }
+  }
+
+  if (methods.has("doctype")) {
+    hasHandler = true
+    handlers.doctype = (doctype) => {
+      const payload = buildDoctypePayload(doctype)
+      const commands = invoke(handlerId, "doctype", payload)
+      applyDoctypeCommands(doctype, commands)
+    }
+  }
+
+  if (methods.has("end")) {
+    hasHandler = true
+    handlers.end = (end) => {
+      const payload = buildEndTagPayload(end)
+      const commands = invoke(handlerId, "end", payload)
+      applyEndTagCommands(end, commands)
+    }
+  }
+
+  if (methods.has("document")) {
+    hasHandler = true
+    handlers.document = (document) => {
+      const commands = invoke(handlerId, "document", {})
+      applyDocumentCommands(document, commands)
+    }
+  }
+
+  if (!hasHandler) {
+    return null
+  }
+
+  return handlers as HTMLRewriterElementHandlers & HTMLRewriterDocumentHandlers
+}
+
+function normalizeHtmlRewriterInput(raw: unknown): HtmlRewriterInputPayload {
+  if (
+    raw &&
+    typeof raw === "object" &&
+    (raw as { type?: unknown }).type === "response"
+  ) {
+    const record = raw as { body?: unknown; status?: unknown; headers?: unknown }
+    return {
+      type: "response",
+      body: toStringSafe(record.body),
+      status: toNumberOrUndefined(record.status),
+      headers: ensureHeaderRecord(record.headers),
+    }
+  }
+  if (
+    raw &&
+    typeof raw === "object" &&
+    (raw as { type?: unknown }).type === "string"
+  ) {
+    const record = raw as { body?: unknown }
+    return { type: "string", body: toStringSafe(record.body) }
+  }
+  if (raw && typeof raw === "object" && "body" in (raw as Record<string, unknown>)) {
+    const record = raw as Record<string, unknown>
+    return { type: "string", body: toStringSafe(record.body) }
+  }
+  return { type: "string", body: toStringSafe(raw) }
+}
+
+function buildResponseFromHtmlRewriterInput(input: HtmlRewriterInputPayload): Response {
+  if (input.type === "response") {
+    const headers = new Headers()
+    const headerRecord = ensureHeaderRecord(input.headers)
+    for (const [key, value] of Object.entries(headerRecord)) {
+      headers.set(key, value)
+    }
+    const status = typeof input.status === "number" ? input.status : 200
+    return new Response(input.body ?? "", { status, headers })
+  }
+  return new Response(input.body ?? "")
+}
+
+function buildElementPayload(element: HTMLRewriterElement): Record<string, unknown> {
+  const attributes = Array.isArray(element.attributes)
+    ? element.attributes.map((attribute) => ({
+        name: toStringSafe(attribute?.name),
+        value:
+          attribute && Object.prototype.hasOwnProperty.call(attribute, "value")
+            ? toStringSafe((attribute as { value?: unknown }).value)
+            : "",
+      }))
+    : []
+  const namespace =
+    typeof (element as { namespaceURI?: unknown }).namespaceURI === "string"
+      ? ((element as { namespaceURI: string }).namespaceURI as string)
+      : null
+  return {
+    tagName: element.tagName,
+    tag_name: element.tagName,
+    namespace,
+    namespaceURI: namespace,
+    attributes,
+  }
+}
+
+function buildTextPayload(text: HTMLRewriterText): Record<string, unknown> {
+  return {
+    text: text.text,
+    lastInTextNode: text.lastInTextNode,
+    last_in_text_node: text.lastInTextNode,
+  }
+}
+
+function buildCommentPayload(comment: HTMLRewriterComment): Record<string, unknown> {
+  return {
+    text: comment.text,
+  }
+}
+
+function buildDoctypePayload(doctype: HTMLRewriterDoctype): Record<string, unknown> {
+  return {
+    name: doctype.name,
+    publicId: doctype.publicId,
+    public_id: doctype.publicId,
+    systemId: doctype.systemId,
+    system_id: doctype.systemId,
+  }
+}
+
+function buildEndTagPayload(end: HTMLRewriterEndTag): Record<string, unknown> {
+  return {
+    name: end.name,
+  }
+}
+
+function applyElementCommands(
+  element: HTMLRewriterElement,
+  commands: HtmlRewriterCommand[],
+): void {
+  if (!Array.isArray(commands)) {
+    return
+  }
+  for (const command of commands) {
+    if (!command || typeof command !== "object") {
+      continue
+    }
+    const op = typeof command.op === "string" ? command.op : ""
+    switch (op) {
+      case "set_attribute": {
+        element.setAttribute(toStringSafe(command.name), toStringSafe(command.value))
+        break
+      }
+      case "remove_attribute": {
+        element.removeAttribute(toStringSafe(command.name))
+        break
+      }
+      case "set_inner_content": {
+        element.setInnerContent(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "set_outer_content": {
+        element.setOuterContent(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "append": {
+        element.append(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "prepend": {
+        element.prepend(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "before": {
+        element.before(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "after": {
+        element.after(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "replace": {
+        element.replace(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "remove": {
+        element.remove()
+        break
+      }
+      case "remove_and_keep_content": {
+        if (typeof element.removeAndKeepContent === "function") {
+          element.removeAndKeepContent()
+        }
+        break
+      }
+      case "add_class": {
+        if (typeof element.addClass === "function") {
+          element.addClass(toStringSafe(command.name))
+        }
+        break
+      }
+      case "remove_class": {
+        if (typeof element.removeClass === "function") {
+          element.removeClass(toStringSafe(command.name))
+        }
+        break
+      }
+      case "toggle_class": {
+        if (typeof element.toggleClass === "function") {
+          const force = toOptionalBoolean(command.force)
+          if (force === undefined) {
+            element.toggleClass(toStringSafe(command.name))
+          } else {
+            element.toggleClass(toStringSafe(command.name), force)
+          }
+        }
+        break
+      }
+    }
+  }
+}
+
+function applyTextCommands(
+  text: HTMLRewriterText,
+  commands: HtmlRewriterCommand[],
+): void {
+  if (!Array.isArray(commands)) {
+    return
+  }
+  for (const command of commands) {
+    if (!command || typeof command !== "object") {
+      continue
+    }
+    const op = typeof command.op === "string" ? command.op : ""
+    switch (op) {
+      case "replace": {
+        text.replace(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "before": {
+        text.before(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "after": {
+        text.after(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "remove": {
+        text.remove()
+        break
+      }
+    }
+  }
+}
+
+function applyCommentCommands(
+  comment: HTMLRewriterComment,
+  commands: HtmlRewriterCommand[],
+): void {
+  if (!Array.isArray(commands)) {
+    return
+  }
+  for (const command of commands) {
+    if (!command || typeof command !== "object") {
+      continue
+    }
+    const op = typeof command.op === "string" ? command.op : ""
+    switch (op) {
+      case "replace": {
+        comment.replace(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "before": {
+        comment.before(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "after": {
+        comment.after(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "remove": {
+        comment.remove()
+        break
+      }
+    }
+  }
+}
+
+function applyDoctypeCommands(
+  doctype: HTMLRewriterDoctype,
+  commands: HtmlRewriterCommand[],
+): void {
+  if (!Array.isArray(commands)) {
+    return
+  }
+  for (const command of commands) {
+    if (!command || typeof command !== "object") {
+      continue
+    }
+    const op = typeof command.op === "string" ? command.op : ""
+    switch (op) {
+      case "replace": {
+        doctype.replace(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "before": {
+        doctype.before(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "after": {
+        doctype.after(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "remove": {
+        doctype.remove()
+        break
+      }
+    }
+  }
+}
+
+function applyDocumentCommands(
+  document: HTMLRewriterDocument,
+  commands: HtmlRewriterCommand[],
+): void {
+  if (!Array.isArray(commands)) {
+    return
+  }
+  for (const command of commands) {
+    if (!command || typeof command !== "object") {
+      continue
+    }
+    const op = typeof command.op === "string" ? command.op : ""
+    switch (op) {
+      case "append": {
+        document.append(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "prepend": {
+        document.prepend(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "append_to_head": {
+        document.appendToHead(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "append_to_body": {
+        document.appendToBody(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "prepend_to_head": {
+        document.prependToHead(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "prepend_to_body": {
+        document.prependToBody(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "replace": {
+        document.replace(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "before": {
+        document.before(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "after": {
+        document.after(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "end": {
+        document.end()
+        break
+      }
+    }
+  }
+}
+
+function applyEndTagCommands(
+  end: HTMLRewriterEndTag,
+  commands: HtmlRewriterCommand[],
+): void {
+  if (!Array.isArray(commands)) {
+    return
+  }
+  for (const command of commands) {
+    if (!command || typeof command !== "object") {
+      continue
+    }
+    const op = typeof command.op === "string" ? command.op : ""
+    switch (op) {
+      case "replace": {
+        end.replace(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "before": {
+        end.before(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "after": {
+        end.after(toStringSafe(command.content), htmlContentOptions(command))
+        break
+      }
+      case "remove": {
+        end.remove()
+        break
+      }
+    }
+  }
+}
+
+function htmlContentOptions(
+  command: HtmlRewriterCommand,
+): HTMLRewriterContentOptions | undefined {
+  const htmlValue = command.html
+  if (htmlValue === true || htmlValue === "true") {
+    return { html: true }
+  }
+  return undefined
+}
+
+function toOptionalBoolean(value: unknown): boolean | undefined {
+  if (value === undefined || value === null) {
+    return undefined
+  }
+  if (typeof value === "boolean") {
+    return value
+  }
+  if (value === "true") {
+    return true
+  }
+  if (value === "false") {
+    return false
+  }
+  return Boolean(value)
+}
+
+function toStringSafe(value: unknown): string {
+  if (typeof value === "string") {
+    return value
+  }
+  if (value === undefined || value === null) {
+    return ""
+  }
+  return String(value)
+}
+
+function toNumberOrUndefined(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) {
+      return parsed
+    }
+  }
+  return undefined
+}
+
+function ensureHeaderRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object") {
+    return {}
+  }
+  const headers: Record<string, string> = {}
+  for (const [key, headerValue] of Object.entries(value as Record<string, unknown>)) {
+    if (headerValue === undefined || headerValue === null) {
+      continue
+    }
+    headers[key] = toStringSafe(headerValue)
+  }
+  return headers
 }
 
 function toRubyStringLiteral(value: string): string {
