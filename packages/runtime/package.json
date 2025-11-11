@@ -45,7 +45,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "copy:ruby": "node ./scripts/copy-ruby-assets.mjs",
-    "test": "vitest run && ruby ./tests/routing_spec.rb && ruby ./tests/cron_spec.rb",
+    "test": "vitest run && ruby ./tests/routing_spec.rb && ruby ./tests/cron_spec.rb && ruby ./tests/html_rewriter_spec.rb",
     "test:watch": "vitest watch",
     "typecheck": "tsc --noEmit",
     "link:global": "npm link"
