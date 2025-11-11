@@ -104,6 +104,51 @@ get "/r2" do |c|
 end
 ```
 
+### HTMLRewriter Text Replacement
+
+If you need to rewrite HTML before returning a response, reach for `Hibana::HTMLRewriter`. The snippet below swaps the text inside a `<p>` element.
+
+```ruby
+rewriter = Hibana::HTMLRewriter.new
+
+rewriter.on("p.highlight") do |element|
+  element.set_inner_content("Replaced from Ruby!")
+end
+
+response = rewriter.transform("<html><body><p class=\"highlight\">before</p></body></html>")
+
+response.body
+# => "<html><body><p class=\"highlight\">Replaced from Ruby!</p></body></html>"
+```
+
+`transform` returns a Cloudflare Workers–compatible response. You can still pair it with helpers such as `RequestContext#html` or an existing `Response` instance.
+
+#### Basic Usage
+
+The next example adds an attribute to `p.highlight` and appends extra HTML content.
+
+```ruby
+rewriter = Hibana::HTMLRewriter.new
+rewriter.on("p.highlight") do |element|
+  element.set_attribute("data-role", "example")
+  element.append("<span>Ruby</span>", html: true)
+end
+
+response = rewriter.transform("<html><body><p class=\"highlight\"></p></body></html>")
+```
+
+#### Document-wide Handler
+
+Use `on_document` for document-scope operations such as inserting nodes into `<head>`.
+
+```ruby
+rewriter = Hibana::HTMLRewriter.new
+rewriter.on_document do |document|
+  document.append_to_head('<meta charset="utf-8">', html: true)
+  document.end
+end
+```
+
 ### Workers AI Integration
 
 You can also integrate with Workers AI. Each model expects different payload fields, so adjust the arguments accordingly.
