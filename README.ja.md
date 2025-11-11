@@ -99,6 +99,25 @@ get "/r2" do |c|
 end
 ```
 
+### HTMLRewriter でのテキスト置き換え
+
+レスポンスを生成する前に HTML を書き換えたい場合は `Hibana::HTMLRewriter` を使用します。たとえば、`<p>` タグの中身を別のテキストに差し替えるには次のように記述できます。
+
+```ruby
+rewriter = Hibana::HTMLRewriter.new
+
+rewriter.on("p.highlight") do |element|
+  element.set_inner_content("Ruby から書き換えました！")
+end
+
+response = rewriter.transform("<html><body><p class=\"highlight\">before</p></body></html>")
+
+response.body
+# => "<html><body><p class=\"highlight\">Ruby から書き換えました！</p></body></html>"
+```
+
+`transform` は Cloudflare Workers のレスポンス互換オブジェクトを返します。既存の `RequestContext#html` や `Response` と組み合わせて使うことも可能です。
+
 ### Workers AI 連携
 
 Workers AI との連携もできます。渡すパラメータはモデルによって異なるので注意してください。
