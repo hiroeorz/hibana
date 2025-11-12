@@ -172,4 +172,21 @@ class OrmSpec < Minitest::Test
     assert_includes query[:sql], "status = ?"
     assert_equal ["draft"], query[:bindings]
   end
+
+  def test_assign_attributes_rejects_unknown_keys
+    assert_raises(Hibana::ORM::InvalidQuery) do
+      Post.create(unknown_column: "oops")
+    end
+  end
+
+  def test_assign_attributes_allows_values_from_existing_columns
+    post = Post.instantiate_from_row("id" => 8, "legacy_flag" => "Y")
+    HostBridge.enqueue_response(JSON.generate({ "success" => true }))
+
+    post.update(legacy_flag: "N")
+
+    query = HostBridge.queries.last
+    assert_includes query[:sql], "legacy_flag = ?"
+    assert_equal ["N", 8], query[:bindings].values_at(0, -1)
+  end
 end

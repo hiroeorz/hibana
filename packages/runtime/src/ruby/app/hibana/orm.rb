@@ -635,7 +635,11 @@ module Hibana
         raise ArgumentError, "assign_attributesにはハッシュを指定してください"
       end
       values.each_pair do |key, value|
-        write_attribute(key, value)
+        attribute_name = key.to_s
+        unless permitted_attribute?(attribute_name)
+          raise ORM::InvalidQuery, "未定義の属性 '#{attribute_name}' は代入できません"
+        end
+        write_attribute(attribute_name, value)
       end
     end
 
@@ -745,7 +749,7 @@ module Hibana
 
     def attribute_defined?(name)
       key = name.to_s
-      @attributes.key?(key) || self.class.attribute_definitions.key?(key)
+      permitted_attribute?(key)
     end
 
     def apply_default_attributes
@@ -771,6 +775,17 @@ module Hibana
       else
         value
       end
+    end
+
+    def permitted_attribute?(name)
+      key = name.to_s
+      return true if @attributes.key?(key)
+      return true if self.class.attribute_definitions.key?(key)
+      return true if key == self.class.primary_key
+      if self.class.timestamps?
+        return true if %w[created_at updated_at].include?(key)
+      end
+      false
     end
 
     def insert_record
