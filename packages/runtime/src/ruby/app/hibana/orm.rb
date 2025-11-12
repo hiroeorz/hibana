@@ -637,7 +637,7 @@ module Hibana
       values.each_pair do |key, value|
         attribute_name = key.to_s
         unless permitted_attribute?(attribute_name)
-          raise ORM::InvalidQuery, "未定義の属性 '#{attribute_name}' は代入できません"
+          raise ORM::InvalidQuery, "Unknown attribute '#{attribute_name}' is not assignable"
         end
         write_attribute(attribute_name, value)
       end
