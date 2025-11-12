@@ -219,4 +219,14 @@ class OrmSpec < Minitest::Test
       post.statuz = "draft"
     end
   end
+
+  def test_default_string_values_are_not_shared
+    first = Post.new
+    second = Post.new
+
+    first.status.upcase!
+
+    assert_equal "DRAFT", first.status
+    assert_equal "draft", second.status
+  end
 end

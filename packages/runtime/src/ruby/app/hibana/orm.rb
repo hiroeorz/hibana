@@ -777,6 +777,17 @@ module Hibana
       when Array
         value.map { |inner| duplicate_default(inner) }
       else
+        duplicate_scalar_default(value)
+      end
+    end
+
+    def duplicate_scalar_default(value)
+      return value if value.nil? || value.is_a?(Numeric) || value == true || value == false || value.is_a?(Symbol)
+      return value unless value.respond_to?(:dup)
+
+      begin
+        value.dup
+      rescue TypeError
         value
       end
     end
