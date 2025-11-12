@@ -524,7 +524,8 @@ module Hibana
             if value.nil?
               nil
             elsif value.is_a?(Hibana::Record)
-              value.read_attribute(value.class.primary_key)
+              target_pk = (pk_option || value.class.primary_key).to_s
+              value.read_attribute(target_pk)
             else
               value
             end

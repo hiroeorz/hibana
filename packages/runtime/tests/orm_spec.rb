@@ -70,6 +70,20 @@ class Post < Hibana::Record
   scope :published, -> { where(status: "published") }
 end
 
+class Account < Hibana::Record
+  table_name "accounts"
+  primary_key :id
+  attribute :uuid, :string
+end
+
+class Article < Hibana::Record
+  table_name "articles"
+  primary_key :id
+  attribute :account_uuid, :string
+
+  belongs_to :account, foreign_key: :account_uuid, class_name: "Account", primary_key: :uuid
+end
+
 class OrmSpec < Minitest::Test
   def setup
     HostBridge.reset!
@@ -188,5 +202,14 @@ class OrmSpec < Minitest::Test
     query = HostBridge.queries.last
     assert_includes query[:sql], "legacy_flag = ?"
     assert_equal ["N", 8], query[:bindings].values_at(0, -1)
+  end
+
+  def test_belongs_to_respects_custom_primary_key_when_assigning
+    account = Account.instantiate_from_row("id" => 1, "uuid" => "acc-123")
+    article = Article.instantiate_from_row("id" => 77)
+
+    article.account = account
+
+    assert_equal "acc-123", article[:account_uuid]
   end
 end
