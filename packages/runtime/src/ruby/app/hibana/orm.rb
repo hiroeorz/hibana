@@ -714,6 +714,9 @@ module Hibana
       name = method_name.to_s
       if name.end_with?("=")
         attribute = name.delete_suffix("=")
+        unless permitted_attribute?(attribute)
+          raise ORM::InvalidQuery, "Unknown attribute '#{attribute}' is not assignable"
+        end
         return write_attribute(attribute, args.first)
       elsif attribute_defined?(name)
         return read_attribute(name)

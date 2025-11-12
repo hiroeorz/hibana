@@ -212,4 +212,11 @@ class OrmSpec < Minitest::Test
 
     assert_equal "acc-123", article[:account_uuid]
   end
+
+  def test_method_missing_writer_rejects_unknown_attribute
+    post = Post.new
+    assert_raises(Hibana::ORM::InvalidQuery) do
+      post.statuz = "draft"
+    end
+  end
 end
