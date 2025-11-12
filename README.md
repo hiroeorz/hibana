@@ -73,6 +73,47 @@ get "/d1" do |c|
 end
 ```
 
+### ORM (Experimental)
+
+Define lightweight models with `Hibana::Record` to avoid hand-writing SQL for common CRUD cases.
+
+`app/models/post.rb`
+
+```ruby
+class Post < Hibana::Record
+  table_name "posts"
+  primary_key :id
+  timestamps true
+
+  attribute :title, :string
+  attribute :views, :integer, default: 0
+  attribute :status, :string, default: "draft"
+
+  belongs_to :user
+
+  scope :published, -> { where(status: "published") }
+end
+```
+
+`app/routes/posts.rb`
+
+```ruby
+get "/posts/popular" do |c|
+  posts = Post
+    .published
+    .where("views >= ?", 1_000)
+    .order(views: :desc)
+    .limit(20)
+
+  c.json(posts.map(&:as_json))
+end
+```
+
+- Chains such as `select`, `where`, `order`, `limit`, `offset`, `count`, `exists?`, `pluck`, `create`, `update`, and `destroy` are supported.
+- Associations (`belongs_to`, `has_many`) and scopes compose naturally, mirroring familiar ActiveRecord ergonomics.
+- Each model talks to the default `:DB` binding; override `connection_name :ANOTHER_DB` when you need a different D1 database.
+- The ORM stays thin—drop back down to `Post.connection.run(sql, binds)` or `HostBridge.run_d1_query` whenever you need full SQL control.
+
 ### KV Integration
 
 `app/app.rb`
