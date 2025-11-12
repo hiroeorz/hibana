@@ -48,7 +48,7 @@ npm run dev
 
 ### Hello World
 
-`app/app.rb`
+`app/routes/posts.rb`
 
 ```ruby
 get "/" do |c|
@@ -103,6 +103,38 @@ get "/posts/popular" do |c|
   c.json(posts.map(&:as_json))
 end
 ```
+
+#### ORM CRUDサンプル
+
+`app/app.rb`
+
+```ruby
+get "/posts/crud-demo" do |c|
+  created = Post.create!(
+    user_id: 1,
+    title: "CRUD demo from Hibana",
+    status: "draft",
+  )
+  created_snapshot = created.as_json
+
+  created.update(status: "published", views: created.views + 1)
+  updated_snapshot = created.reload.as_json
+
+  selected_snapshot = Post.find(created.id).as_json
+  Post.destroy(created.id)
+
+  c.json(
+    create: created_snapshot,
+    update: updated_snapshot,
+    select: selected_snapshot,
+    delete: { id: created.id },
+  )
+end
+```
+
+- 生成から参照・更新・削除まで `Hibana::Record` のDSLだけで完結するサンプルです。
+- `user_id` や `title` といった固定値は、`c.req.json` や `c.params` から受け取った値に置き換えてください。
+- 最後に削除しているため、デモエンドポイントを何度叩いてもテーブルにレコードを残しません。
 
 - `select`, `where`, `order`, `limit`, `offset`, `count`, `exists?`, `pluck`, `create`, `update`, `destroy` など、日常的なDSLをチェーン可能です。
 - `belongs_to` / `has_many` や `scope` も用意しているため、ActiveRecord ライクな記述感を重視しています。
