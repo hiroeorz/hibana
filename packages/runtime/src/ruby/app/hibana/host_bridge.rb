@@ -25,7 +25,8 @@ module HostBridge
       unless ts_run_d1_query
         raise "Host function 'ts_run_d1_query' is not registered"
       end
-      ts_run_d1_query.apply(binding_name.to_s, sql, bindings, action).await
+      result = ts_run_d1_query.apply(binding_name.to_s, sql, bindings, action).await
+      result.is_a?(String) ? result : result.to_s
     end
 
     def http_fetch(request_payload)

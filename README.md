@@ -109,6 +109,38 @@ get "/posts/popular" do |c|
 end
 ```
 
+#### ORM CRUD Sample
+
+`app/routes/posts.rb`
+
+```ruby
+get "/posts/crud-demo" do |c|
+  created = Post.create!(
+    user_id: 1,
+    title: "CRUD demo from Hibana",
+    status: "draft",
+  )
+  created_snapshot = created.as_json
+
+  created.update(status: "published", views: created.views + 1)
+  updated_snapshot = created.reload.as_json
+
+  selected_snapshot = Post.find(created.id).as_json
+  Post.destroy(created.id)
+
+  c.json(
+    create: created_snapshot,
+    update: updated_snapshot,
+    select: selected_snapshot,
+    delete: { id: created.id },
+  )
+end
+```
+
+- The entire flow relies on `Hibana::Record`, so no manual SQL is necessary for create/update/select/delete.
+- Swap the hard-coded `user_id`, `title`, and `status` values with request data when turning this into a production route.
+- The row is deleted at the end, allowing you to hit the demo endpoint repeatedly without cluttering the table.
+
 - Chains such as `select`, `where`, `order`, `limit`, `offset`, `count`, `exists?`, `pluck`, `create`, `update`, and `destroy` are supported.
 - Associations (`belongs_to`, `has_many`) and scopes compose naturally, mirroring familiar ActiveRecord ergonomics.
 - Each model talks to the default `:DB` binding; override `connection_name :ANOTHER_DB` when you need a different D1 database.
