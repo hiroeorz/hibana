@@ -1,3 +1,5 @@
+require "json"
+
 module HostBridge
   class << self
     attr_accessor :ts_call_binding,
@@ -5,7 +7,9 @@ module HostBridge
       :ts_http_fetch,
       :ts_workers_ai_invoke,
       :ts_report_ruby_error,
-      :ts_html_rewriter_transform
+      :ts_html_rewriter_transform,
+      :ts_durable_object_storage_op,
+      :ts_durable_object_alarm_op
 
     def call(binding_name, method_name, *args)
       ensure_call_binding_registered!
@@ -83,6 +87,56 @@ module HostBridge
       unless ts_call_binding
         raise "Host function 'ts_call_binding' is not registered"
       end
+    end
+
+    def ensure_host_function!(name, fn)
+      unless fn
+        raise "Host function '#{name}' is not registered"
+      end
+    end
+  end
+
+  class << self
+    def durable_object_storage_op(state_handle, payload)
+      ensure_host_function!("ts_durable_object_storage_op", ts_durable_object_storage_op)
+      payload_json = JSON.generate(payload || {})
+      result = ts_durable_object_storage_op.apply(state_handle.to_s, payload_json)
+      parse_host_response(result)
+    end
+
+    def durable_object_alarm_op(state_handle, payload)
+      ensure_host_function!("ts_durable_object_alarm_op", ts_durable_object_alarm_op)
+      payload_json = JSON.generate(payload || {})
+      result = ts_durable_object_alarm_op.apply(state_handle.to_s, payload_json)
+      parse_host_response(result)
+    end
+
+    private
+
+    def parse_host_response(result)
+      serialized =
+        if result.respond_to?(:await)
+          result.await
+        else
+          result
+        end
+      data =
+        if serialized.nil? || serialized.to_s.empty?
+          {}
+        else
+          JSON.parse(serialized.to_s)
+        end
+      if data.is_a?(Hash) && data["ok"]
+        data["result"]
+      elsif data.is_a?(Hash)
+        error = data["error"] || {}
+        message = error["message"] || "Durable Object host operation failed"
+        raise message
+      else
+        raise "Durable Object host response is malformed"
+      end
+    rescue JSON::ParserError => e
+      raise "Failed to parse Durable Object host response: #{e.message}"
     end
   end
 end

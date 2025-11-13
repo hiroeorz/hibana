@@ -1,5 +1,11 @@
 import "./polyfills"
-import { handleRequest, handleScheduled } from "./ruby-runtime"
+import {
+  handleRequest,
+  handleScheduled,
+  handleDurableObjectFetch,
+  handleDurableObjectAlarm,
+  createDurableObjectClass,
+} from "./ruby-runtime"
 import type { RuntimeScheduledEvent } from "./ruby-runtime"
 import type { Env } from "./env"
 
@@ -33,7 +39,13 @@ export {
   getStaticAssets,
   type StaticAsset,
 } from "./static-registry"
-export { handleRequest, handleScheduled }
+export {
+  handleRequest,
+  handleScheduled,
+  handleDurableObjectFetch,
+  handleDurableObjectAlarm,
+  createDurableObjectClass,
+}
 export type { RuntimeScheduledEvent }
 
 interface ExecutionContextLike {
