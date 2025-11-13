@@ -257,6 +257,46 @@ class RequestContext
     @form_body = nil
   end
 
+  def request_headers
+    @request_headers ||= {}
+  end
+
+  def set_request_headers(value)
+    if value.nil? || value.empty?
+      @request_headers = {}
+      return
+    end
+
+    parsed = JSON.parse(value)
+    @request_headers = normalize_headers_hash(parsed)
+  rescue JSON::ParserError
+    @request_headers = {}
+  end
+
+  def request_method
+    @request_method
+  end
+
+  def set_request_method(value)
+    @request_method = value.nil? || value.empty? ? nil : value.to_s.upcase
+  end
+
+  def request_url
+    @request_url
+  end
+
+  def set_request_url(value)
+    @request_url = value.nil? || value.empty? ? nil : value.to_s
+  end
+
+  def request_path
+    @request_path ||= "/"
+  end
+
+  def set_request_path(value)
+    @request_path = value.nil? || value.empty? ? "/" : value.to_s
+  end
+
   def method_missing(name, *args, &block)
     return fetch_binding(name) if args.empty? && block.nil?
     super
@@ -326,5 +366,14 @@ class RequestContext
 
   def normalize_param_key(key)
     key.is_a?(Symbol) ? key.to_s : key
+  end
+
+  def normalize_headers_hash(values)
+    return {} unless values.is_a?(Hash)
+
+    values.each_with_object({}) do |(key, value), acc|
+      next if value.nil?
+      acc[key.to_s.downcase] = value.to_s
+    end
   end
 end

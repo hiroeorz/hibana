@@ -1,10 +1,11 @@
 import { DefaultRubyVM } from "@ruby/wasm-wasi/dist/browser"
-import type { RubyVM } from "@ruby/wasm-wasi"
+import type { RubyVM, RbValue } from "@ruby/wasm-wasi"
 import rubyWasmAsset from "@ruby/3.4-wasm-wasi/dist/ruby+stdlib.wasm"
 import type { Env } from "./env"
 import hostBridgeScript from "./ruby/app/hibana/host_bridge.rb"
 import templateRendererScript from "./ruby/app/hibana/template_renderer.rb"
 import contextScript from "./ruby/app/hibana/context.rb"
+import durableObjectScript from "./ruby/app/hibana/durable_object.rb"
 import cronScript from "./ruby/app/hibana/cron.rb"
 import kvClientScript from "./ruby/app/hibana/kv_client.rb"
 import d1ClientScript from "./ruby/app/hibana/d1_client.rb"
@@ -26,6 +27,15 @@ import { getTemplateAssets } from "./template-registry"
 import { getStaticAssets } from "./static-registry"
 import { transformHtmlWithRubyHandlers } from "./html-rewriter-bridge"
 import { toRubyStringLiteral } from "./ruby-utils"
+import {
+  registerDurableObjectState,
+  runDurableObjectStorageOp,
+  runDurableObjectAlarmOp,
+  type DurableObjectMetadata,
+  type DurableObjectStateLike,
+  type DurableObjectStorageOpPayload,
+  type DurableObjectAlarmOpPayload,
+} from "./durable-object-host"
 
 type HostGlobals = typeof globalThis & {
   tsCallBinding?: (
@@ -43,6 +53,14 @@ type HostGlobals = typeof globalThis & {
   tsWorkersAiInvoke?: (payloadJson: string) => Promise<string>
   tsReportRubyError?: (payloadJson: string) => Promise<void>
   tsHtmlRewriterTransform?: (payloadJson: string) => Promise<string>
+  tsDurableObjectStorageOp?: (
+    stateHandle: string,
+    payloadJson: string,
+  ) => Promise<string>
+  tsDurableObjectAlarmOp?: (
+    stateHandle: string,
+    payloadJson: string,
+  ) => Promise<string>
 }
 
 interface WorkerResponsePayload {
@@ -99,24 +117,25 @@ async function setupRubyVM(env: Env): Promise<RubyVM> {
       registerHostFunctions(vm, env) // 2. ブリッジに関数を登録
       await evalRubyFile(vm, templateRendererScript, "app/hibana/template_renderer.rb") // 3. テンプレート
       await evalRubyFile(vm, contextScript, "app/hibana/context.rb") // 4. コンテキスト
-      await evalRubyFile(vm, cronScript, "app/hibana/cron.rb") // 5. Cron DSL
-      await evalRubyFile(vm, kvClientScript, "app/hibana/kv_client.rb") // 6. KVクライアント
-      await evalRubyFile(vm, d1ClientScript, "app/hibana/d1_client.rb") // 7. D1クライアント
-      await evalRubyFile(vm, ormScript, "app/hibana/orm.rb") // 8. ORM
-      await evalRubyFile(vm, r2ClientScript, "app/hibana/r2_client.rb") // 9. R2クライアント
-      await evalRubyFile(vm, httpClientScript, "app/hibana/http_client.rb") // 10. HTTPクライアント
-      await evalRubyFile(vm, workersAiClientScript, "app/hibana/workers_ai_client.rb") // 11. Workers AIクライアント
-      await evalRubyFile(vm, staticServerScript, "app/hibana/static_server.rb") // 12. 静的サーバー
-      await evalRubyFile(vm, htmlRewriterScript, "app/hibana/html_rewriter.rb") // 13. HTMLRewriter
-      await registerTemplates(vm) // 14. テンプレート資材をロード
-      await registerStaticAssets(vm) // 15. 静的アセットをロード
+      await evalRubyFile(vm, durableObjectScript, "app/hibana/durable_object.rb") // 5. Durable Object DSL
+      await evalRubyFile(vm, cronScript, "app/hibana/cron.rb") // 6. Cron DSL
+      await evalRubyFile(vm, kvClientScript, "app/hibana/kv_client.rb") // 7. KVクライアント
+      await evalRubyFile(vm, d1ClientScript, "app/hibana/d1_client.rb") // 8. D1クライアント
+      await evalRubyFile(vm, ormScript, "app/hibana/orm.rb") // 9. ORM
+      await evalRubyFile(vm, r2ClientScript, "app/hibana/r2_client.rb") // 10. R2クライアント
+      await evalRubyFile(vm, httpClientScript, "app/hibana/http_client.rb") // 11. HTTPクライアント
+      await evalRubyFile(vm, workersAiClientScript, "app/hibana/workers_ai_client.rb") // 12. Workers AIクライアント
+      await evalRubyFile(vm, staticServerScript, "app/hibana/static_server.rb") // 13. 静的サーバー
+      await evalRubyFile(vm, htmlRewriterScript, "app/hibana/html_rewriter.rb") // 14. HTMLRewriter
+      await registerTemplates(vm) // 15. テンプレート資材をロード
+      await registerStaticAssets(vm) // 16. 静的アセットをロード
 
-      // 16. app/helpers 以下のファイルを順次読み込み
+      // 17. app/helpers 以下のファイルを順次読み込み
       for (const helper of getHelperScripts()) {
         await evalRubyFile(vm, helper.source, helper.filename) // app/helpers配下
       }
 
-      await evalRubyFile(vm, routingScript, "app/hibana/routing.rb") // 17. ルーティングDSL
+      await evalRubyFile(vm, routingScript, "app/hibana/routing.rb") // 18. ルーティングDSL
 
       for (const script of getApplicationScripts()) {
         await evalRubyFile(vm, script.source, script.filename)
@@ -137,61 +156,23 @@ export async function handleRequest(
   const pathname = url.pathname
 
   const context = vm.eval("RequestContext.new")
+  const headersJson = JSON.stringify(buildHeadersObject(request.headers))
   const queryJson = JSON.stringify(buildQueryObject(url.searchParams))
+  const headersArg = vm.eval(toRubyStringLiteral(headersJson))
   const queryArg = vm.eval(toRubyStringLiteral(queryJson))
-  context.call("set_query_from_json", queryArg)
-  await populateBodyOnContext(context, request, vm)
-  const dispatcher = vm.eval("method(:dispatch)")
   const methodArg = vm.eval(toRubyStringLiteral(request.method))
   const pathArg = vm.eval(toRubyStringLiteral(pathname))
+  const urlArg = vm.eval(toRubyStringLiteral(request.url))
+  contextCall(context, "set_request_headers", headersArg)
+  contextCall(context, "set_request_method", methodArg)
+  contextCall(context, "set_request_path", pathArg)
+  contextCall(context, "set_request_url", urlArg)
+  contextCall(context, "set_query_from_json", queryArg)
+  await populateBodyOnContext(context, request, vm)
+  const dispatcher = vm.eval("method(:dispatch)")
   const result = await dispatcher.callAsync("call", methodArg, pathArg, context)
   const serialized = result.toString()
-
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(serialized)
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : "Unknown JSON parse error"
-    throw new Error(
-      `Failed to parse Ruby response payload: ${reason}\nPayload: ${serialized}`,
-    )
-  }
-
-  if (
-    !parsed ||
-    typeof parsed !== "object" ||
-    !("body" in parsed) ||
-    !("status" in parsed) ||
-    !("headers" in parsed)
-  ) {
-    throw new Error("Ruby response payload is malformed")
-  }
-
-  const payload = parsed as {
-    body: unknown
-    status: unknown
-    headers: Record<string, unknown>
-  }
-
-  const headers: Record<string, string> = {}
-  if (payload.headers && typeof payload.headers === "object") {
-    for (const [key, value] of Object.entries(payload.headers)) {
-      if (value === undefined || value === null) {
-        continue
-      }
-      headers[key] = typeof value === "string" ? value : String(value)
-    }
-  }
-
-  const body =
-    typeof payload.body === "string" ? payload.body : String(payload.body ?? "")
-  const status =
-    typeof payload.status === "number"
-      ? payload.status
-      : Number(payload.status ?? 200)
-
-  return { body, status, headers }
+  return parseRubyResponsePayload(serialized)
 }
 
 export async function handleScheduled(
@@ -234,6 +215,102 @@ export async function handleScheduled(
       payload.error?.message ||
       "Ruby cron handler failed without an error message"
     throw new Error(message)
+  }
+}
+
+export async function handleDurableObjectFetch(
+  bindingName: string,
+  stateHandle: string,
+  metadata: DurableObjectMetadata,
+  request: Request,
+  env: Env,
+): Promise<WorkerResponsePayload> {
+  const vm = await setupRubyVM(env)
+  const context = await createDurableObjectRequestContext(vm, request)
+  const dispatcher = vm.eval("Hibana::DurableObjects")
+  const bindingArg = vm.eval(toRubyStringLiteral(bindingName))
+  const stateArg = vm.eval(toRubyStringLiteral(stateHandle))
+  const metadataJson = JSON.stringify(metadata ?? {})
+  const metadataArg = vm.eval(toRubyStringLiteral(metadataJson))
+  const result = await dispatcher.callAsync(
+    "dispatch_fetch",
+    bindingArg,
+    stateArg,
+    metadataArg,
+    context,
+  )
+  const serialized = result.toString()
+  return parseRubyResponsePayload(serialized)
+}
+
+export async function handleDurableObjectAlarm(
+  bindingName: string,
+  stateHandle: string,
+  metadata: DurableObjectMetadata,
+  env: Env,
+): Promise<void> {
+  const vm = await setupRubyVM(env)
+  const dispatcher = vm.eval("Hibana::DurableObjects")
+  const bindingArg = vm.eval(toRubyStringLiteral(bindingName))
+  const stateArg = vm.eval(toRubyStringLiteral(stateHandle))
+  const metadataJson = JSON.stringify(metadata ?? {})
+  const metadataArg = vm.eval(toRubyStringLiteral(metadataJson))
+  await dispatcher.callAsync("dispatch_alarm", bindingArg, stateArg, metadataArg)
+}
+
+export function createDurableObjectClass(
+  bindingName: string,
+): new (state: DurableObjectStateLike, env: Env) => {
+  fetch(request: Request): Promise<Response>
+  alarm(): Promise<void>
+} {
+  const normalizedBinding = bindingName.toString()
+  return class HibanaDurableObjectBridge {
+    private readonly stateHandle: string
+    private readonly metadata: DurableObjectMetadata
+
+    constructor(
+      private readonly state: DurableObjectStateLike,
+      private readonly env: Env,
+    ) {
+      const registration = registerDurableObjectState(normalizedBinding, state)
+      this.stateHandle = registration.handle
+      this.metadata = registration.metadata
+    }
+
+    async fetch(request: Request): Promise<Response> {
+      try {
+        const payload = await handleDurableObjectFetch(
+          normalizedBinding,
+          this.stateHandle,
+          this.metadata,
+          request,
+          this.env,
+        )
+        return new Response(payload.body, {
+          status: payload.status,
+          headers: payload.headers,
+        })
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Unknown Durable Object error"
+        return new Response(`Ruby Durable Object error: ${message}`, {
+          status: 500,
+          headers: { "content-type": "text/plain; charset=UTF-8" },
+        })
+      }
+    }
+
+    async alarm(): Promise<void> {
+      await handleDurableObjectAlarm(
+        normalizedBinding,
+        this.stateHandle,
+        this.metadata,
+        this.env,
+      )
+    }
   }
 }
 
@@ -431,6 +508,44 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
     }
   }
 
+  if (typeof host.tsDurableObjectStorageOp !== "function") {
+    host.tsDurableObjectStorageOp = async (
+      stateHandle: string,
+      payloadJson: string,
+    ): Promise<string> => {
+      try {
+        const payload = JSON.parse(payloadJson) as DurableObjectStorageOpPayload
+        const result = await runDurableObjectStorageOp(stateHandle, payload)
+        return JSON.stringify(result)
+      } catch (rawError) {
+        const error = rawError instanceof Error ? rawError : new Error(String(rawError))
+        return JSON.stringify({
+          ok: false,
+          error: { message: error.message, name: error.name },
+        })
+      }
+    }
+  }
+
+  if (typeof host.tsDurableObjectAlarmOp !== "function") {
+    host.tsDurableObjectAlarmOp = async (
+      stateHandle: string,
+      payloadJson: string,
+    ): Promise<string> => {
+      try {
+        const payload = JSON.parse(payloadJson) as DurableObjectAlarmOpPayload
+        const result = await runDurableObjectAlarmOp(stateHandle, payload)
+        return JSON.stringify(result)
+      } catch (rawError) {
+        const error = rawError instanceof Error ? rawError : new Error(String(rawError))
+        return JSON.stringify({
+          ok: false,
+          error: { message: error.message, name: error.name },
+        })
+      }
+    }
+  }
+
   if (typeof host.tsReportRubyError !== "function") {
     host.tsReportRubyError = async (payloadJson: string): Promise<void> => {
       try {
@@ -472,6 +587,8 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
   HostBridge.call("ts_workers_ai_invoke=", vm.wrap(host.tsWorkersAiInvoke))
   HostBridge.call("ts_report_ruby_error=", vm.wrap(host.tsReportRubyError))
   HostBridge.call("ts_html_rewriter_transform=", vm.wrap(host.tsHtmlRewriterTransform))
+  HostBridge.call("ts_durable_object_storage_op=", vm.wrap(host.tsDurableObjectStorageOp))
+  HostBridge.call("ts_durable_object_alarm_op=", vm.wrap(host.tsDurableObjectAlarmOp))
 }
 
 function ensureRecord(
@@ -485,6 +602,62 @@ function ensureRecord(
     return value as Record<string, unknown>
   }
   throw new Error(`Workers AI payload '${label}' must be provided as an object`)
+}
+
+function parseRubyResponsePayload(serialized: string): WorkerResponsePayload {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(serialized)
+  } catch (error) {
+    const reason =
+      error instanceof Error ? error.message : "Unknown JSON parse error"
+    throw new Error(
+      `Failed to parse Ruby response payload: ${reason}\nPayload: ${serialized}`,
+    )
+  }
+
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    !("body" in parsed) ||
+    !("status" in parsed) ||
+    !("headers" in parsed)
+  ) {
+    throw new Error("Ruby response payload is malformed")
+  }
+
+  const payload = parsed as {
+    body: unknown
+    status: unknown
+    headers: Record<string, unknown>
+  }
+
+  const headers: Record<string, string> = {}
+  if (payload.headers && typeof payload.headers === "object") {
+    for (const [key, value] of Object.entries(payload.headers)) {
+      if (value === undefined || value === null) {
+        continue
+      }
+      headers[key] = typeof value === "string" ? value : String(value)
+    }
+  }
+
+  const body =
+    typeof payload.body === "string" ? payload.body : String(payload.body ?? "")
+  const status =
+    typeof payload.status === "number"
+      ? payload.status
+      : Number(payload.status ?? 200)
+
+  return { body, status, headers }
+}
+
+function buildHeadersObject(headers: Headers): Record<string, string> {
+  const result: Record<string, string> = {}
+  headers.forEach((value, key) => {
+    result[key] = value
+  })
+  return result
 }
 
 function buildQueryObject(
@@ -531,7 +704,7 @@ function buildScheduledPayload(
 }
 
 async function populateBodyOnContext(
-  context: unknown,
+  context: RbValue,
   request: Request,
   vm: RubyVM,
 ): Promise<void> {
@@ -568,7 +741,29 @@ async function populateBodyOnContext(
   }
 }
 
-function contextCall(context: unknown, method: string, arg: unknown): void {
+async function createDurableObjectRequestContext(
+  vm: RubyVM,
+  request: Request,
+): Promise<RbValue> {
+  const context = vm.eval("RequestContext.new")
+  const url = new URL(request.url)
+  const headersJson = JSON.stringify(buildHeadersObject(request.headers))
+  const queryJson = JSON.stringify(buildQueryObject(url.searchParams))
+  const headersArg = vm.eval(toRubyStringLiteral(headersJson))
+  const queryArg = vm.eval(toRubyStringLiteral(queryJson))
+  const methodArg = vm.eval(toRubyStringLiteral(request.method))
+  const pathArg = vm.eval(toRubyStringLiteral(url.pathname))
+  const urlArg = vm.eval(toRubyStringLiteral(request.url))
+  contextCall(context, "set_request_headers", headersArg)
+  contextCall(context, "set_request_method", methodArg)
+  contextCall(context, "set_request_path", pathArg)
+  contextCall(context, "set_request_url", urlArg)
+  contextCall(context, "set_query_from_json", queryArg)
+  await populateBodyOnContext(context, request, vm)
+  return context
+}
+
+function contextCall(context: RbValue, method: string, arg: unknown): void {
   if (
     typeof context === "object" &&
     context !== null &&
