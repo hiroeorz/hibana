@@ -114,6 +114,180 @@ module Hibana
       end
     end
 
+    class Error < StandardError; end
+
+    class Namespace
+      def initialize(binding_name)
+        @binding_name = binding_name.to_s
+      end
+
+      def fetch(id = nil, name: nil, &block)
+        stub = build_stub(id, name)
+        return stub.fetch(&block) if block_given?
+        stub
+      end
+
+      alias get fetch
+
+      private
+
+      def build_stub(id, name)
+        target =
+          if name
+            { "type" => "name", "value" => name.to_s }
+          elsif id
+            { "type" => "id", "value" => id.to_s }
+          else
+            raise ArgumentError, "Provide either an id or name"
+          end
+        Stub.new(@binding_name, target)
+      end
+    end
+
+    class Response
+      attr_reader :status, :headers, :body
+
+      def initialize(payload)
+        @status = payload["status"].to_i
+        @headers = normalize_headers(payload["headers"])
+        @body = payload["body"].to_s
+      end
+
+      def ok?
+        status >= 200 && status < 300
+      end
+
+      def text
+        @body
+      end
+
+      def json
+        JSON.parse(@body)
+      rescue JSON::ParserError => e
+        raise Error, "Failed to parse JSON response: #{e.message}"
+      end
+
+      private
+
+      def normalize_headers(values)
+        return {} unless values.is_a?(Hash)
+        values.each_with_object({}) do |(key, value), acc|
+          next if value.nil?
+          acc[key.to_s.downcase] = value.to_s
+        end
+      end
+    end
+
+    class RequestBuilder
+      HTTP_METHODS = %i[get post put delete patch head].freeze
+
+      attr_reader :method, :path, :headers, :query, :body, :json
+
+      def self.from_arguments(method, options, &block)
+        builder = new
+        if block_given?
+          builder.instance_eval(&block)
+        else
+          builder.apply_method(method || :get, options || {})
+        end
+        builder.to_h
+      end
+
+      def initialize
+        @method = "GET"
+        @path = "/"
+        @headers = {}
+        @query = nil
+        @body = nil
+        @json = nil
+      end
+
+      HTTP_METHODS.each do |http_method|
+        define_method(http_method) do |**options|
+          apply_method(http_method, options)
+        end
+      end
+
+      def to_h
+        validate_body_options!
+        hash = {
+          method: @method,
+          path: @path,
+        }
+        hash[:headers] = @headers unless @headers.empty?
+        hash[:query] = @query if @query
+        hash[:body] = @body if @body
+        hash[:json] = @json if @json
+        hash
+      end
+
+      private
+
+      def apply_method(http_method, options)
+        @method = http_method.to_s.upcase
+        @path = options[:path] ? options[:path].to_s : "/"
+        @headers = merge_headers(@headers, options[:headers])
+        @query = normalize_params(options[:query] || options[:params]) if options[:query] || options[:params]
+        @body = options[:body] if options.key?(:body)
+        @json = options[:json] if options.key?(:json)
+        self
+      end
+
+      def merge_headers(existing, additional)
+        return existing unless additional
+        additional.each_with_object(existing.dup) do |(key, value), acc|
+          acc[key.to_s] = value.to_s
+        end
+      end
+
+      def normalize_params(params)
+        return nil if params.nil?
+        params.each_with_object({}) do |(key, value), acc|
+          if value.is_a?(Array)
+            acc[key.to_s] = value.map(&:to_s)
+          else
+            acc[key.to_s] = value.to_s
+          end
+        end
+      end
+
+      def validate_body_options!
+        return unless @body && @json
+        raise ArgumentError, "Specify either :body or :json, not both"
+      end
+    end
+
+    class Stub
+      def initialize(binding_name, target)
+        @binding_name = binding_name.to_s
+        @target = target
+      end
+
+      def fetch(method = :get, **options, &block)
+        payload = RequestBuilder.from_arguments(method, options, &block)
+        result = HostBridge.durable_object_stub_fetch(
+          @binding_name,
+          @target,
+          payload,
+        )
+        Response.new(result)
+      rescue => error
+        raise Error, error.message
+      end
+
+      def json(...)
+        fetch(...).json
+      end
+
+      def text(...)
+        fetch(...).text
+      end
+
+      def ok?(...)
+        fetch(...).ok?
+      end
+    end
+
     class Base
       class MissingRequestContextError < StandardError; end
 
@@ -217,6 +391,7 @@ module Hibana
         end
 
         key = binding_name.to_s
+        register_namespace_binding(key)
         registry[key] = {
           binding: key,
           klass: klass,
@@ -342,6 +517,12 @@ module Hibana
         }
         HostBridge.report_ruby_error(JSON.generate(payload))
       rescue StandardError
+      end
+
+      def register_namespace_binding(key)
+        RequestContext.register_binding(key) do |_context, binding_name|
+          Hibana::DurableObject::Namespace.new(binding_name)
+        end
       end
     end
   end
