@@ -1,6 +1,15 @@
 require "json"
 
 module HostBridge
+  class D1QueryError < StandardError
+    attr_reader :details
+
+    def initialize(message, details = nil)
+      super(message)
+      @details = details || {}
+    end
+  end
+
   class << self
     attr_accessor :ts_call_binding,
       :ts_run_d1_query,
@@ -30,8 +39,8 @@ module HostBridge
 
     def run_d1_query(binding_name, sql, bindings, action)
       ensure_host_function!("ts_run_d1_query", ts_run_d1_query)
-      payload = ts_run_d1_query.apply(binding_name.to_s, sql, bindings, action).await
-      parse_host_response(payload, context: "D1 query failed")
+      serialized = invoke_host_function(ts_run_d1_query, binding_name.to_s, sql, bindings, action)
+      parse_d1_response(serialized)
     end
 
     def http_fetch(request_payload)
@@ -169,6 +178,35 @@ module HostBridge
     def normalize_target(target)
       return target if target.is_a?(Hash)
       raise ArgumentError, "Durable Object target must be provided as a hash"
+    end
+
+    def invoke_host_function(fn, *args)
+      result = fn.apply(*args)
+      if result.respond_to?(:await)
+        result.await
+      else
+        result
+      end
+    end
+
+    def parse_d1_response(serialized)
+      data =
+        if serialized.nil? || serialized.to_s.empty?
+          {}
+        else
+          JSON.parse(serialized.to_s)
+        end
+      if data.is_a?(Hash) && data["ok"]
+        data["result"]
+      elsif data.is_a?(Hash)
+        error = data["error"].is_a?(Hash) ? data["error"] : {}
+        message = error["message"] || "D1 query failed"
+        raise D1QueryError.new(message, error)
+      else
+        raise D1QueryError.new("D1 query failed: response is malformed")
+      end
+    rescue JSON::ParserError => e
+      raise D1QueryError.new("Failed to parse D1 response: #{e.message}")
     end
   end
 end

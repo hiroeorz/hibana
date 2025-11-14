@@ -75,6 +75,8 @@ module Hibana
         raise ORM::DatabaseError, parsed["error"].to_s
       end
       parsed
+    rescue HostBridge::D1QueryError => e
+      raise ORM::DatabaseError, e.message
     end
 
     def map_action(action)
