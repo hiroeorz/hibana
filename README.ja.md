@@ -198,6 +198,26 @@ end
 - `_QUEUE` 以外の名前を使う場合は、起動時に `Hibana::Queues.register(:BACKGROUND_JOBS)` を一度呼び出すだけで同じラッパーを適用できます。
 - Cloudflare Queue が受け付ける `contentType` は `"json"`, `"text"`, `"bytes"`, `"v8"` のみです。Hibana 側で `application/json` などの別名を正規化し、該当しない値を指定した場合は実行前に `ArgumentError` で通知します。
 
+### Queue連携（受信）
+
+`app/app.rb`
+
+```ruby
+queue binding: :TASK_QUEUE do |batch, ctx|
+  batch.each do |message|
+    puts "[queue] #{message.id}: #{message.body.inspect}"
+    message.ack!
+  rescue => error
+    warn "[queue] retry #{message.id}: #{error.message}"
+    message.retry!(delay_seconds: 30)
+  end
+end
+```
+
+- `wrangler.toml` に `[[queues.consumers]]` を追加すると、該当のバッチが Ruby に渡されます。`binding:` や `queue:` オプションで処理対象を絞り込むこともできます。
+- `batch.messages` は Ruby オブジェクトに変換され、`message.body` / `message.raw_body` / `message.timestamp` などへ直接アクセスできます。`ack!` すると再配信されません。
+- ブロックの外へ例外が伝播すると Cloudflare 側でバッチ全体がリトライされるため、成功したメッセージは事前に `ack!`、リトライさせたいメッセージには `retry!(delay_seconds:)` を呼んでから例外を投げてください。
+
 ### Durable Object 連携
 
 `app/durable/` 配下にクラスを置き、`Hibana::DurableObjects.register` でバインディング名を結びつけます。

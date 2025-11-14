@@ -2,6 +2,7 @@ import "./polyfills"
 import {
   handleRequest,
   handleScheduled,
+  handleQueue,
   handleDurableObjectFetch,
   handleDurableObjectAlarm,
   createDurableObjectClass,
@@ -42,6 +43,7 @@ export {
 export {
   handleRequest,
   handleScheduled,
+  handleQueue,
   handleDurableObjectFetch,
   handleDurableObjectAlarm,
   createDurableObjectClass,
@@ -84,6 +86,38 @@ export async function runtimeScheduled(
   await cronPromise
 }
 
-const runtime = { fetch: runtimeFetch, scheduled: runtimeScheduled }
+export async function runtimeQueue(
+  batch: QueueMessageBatch,
+  env: Env,
+  ctx?: ExecutionContextLike,
+): Promise<void> {
+  const queuePromise = handleQueue(env, batch)
+  if (ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil(queuePromise)
+  }
+  await queuePromise
+}
+
+const runtime = {
+  fetch: runtimeFetch,
+  scheduled: runtimeScheduled,
+  queue: runtimeQueue,
+}
 
 export default runtime
+
+type QueueMessage = {
+  id: string
+  timestamp: Date | number
+  body: unknown
+  attempts: number
+  ack(): void | Promise<void>
+  retry(options?: { delaySeconds?: number }): void | Promise<void>
+}
+
+type QueueMessageBatch = {
+  queue: string
+  messages: readonly QueueMessage[]
+  ackAll(): void | Promise<void>
+  retryAll(options?: { delaySeconds?: number }): void | Promise<void>
+}

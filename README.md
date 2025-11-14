@@ -203,6 +203,26 @@ end
 - If your binding doesn’t follow the `_QUEUE` naming pattern, register it manually once during boot: `Hibana::Queues.register(:BACKGROUND_JOBS)`.
 - Cloudflare Queues accepts only `"json"`, `"text"`, `"bytes"`, or `"v8"` for `contentType`. Hibana normalizes common aliases (e.g. `application/json`) and raises an error if another value is requested to avoid runtime failures.
 
+### Queue Integration (Consume)
+
+`app/app.rb`
+
+```ruby
+queue binding: :TASK_QUEUE do |batch, ctx|
+  batch.messages.each do |message|
+    puts "[queue] #{message.id} -> #{message.body.inspect}"
+    message.ack!
+  rescue => error
+    warn "[queue] retry #{message.id}: #{error.message}"
+    message.retry!(delay_seconds: 30)
+  end
+end
+```
+
+- Declare `[[queues.consumers]]` per binding in `wrangler.toml`; incoming queue events automatically hydrate `batch`/`message` objects.
+- `batch.ack_all!` / `retry_all!` wrap the Workers API, while each `message` exposes `body`, `raw_body`, `timestamp`, `ack!`, and `retry!(delay_seconds:)`.
+- Unhandled exceptions bubble up to Workers so the batch is retried—acknowledge successful work before raising, and call `retry!` when you want an individual message re-queued.
+
 ### Durable Object Integration
 
 Define your Durable Object class under `app/durable/` and register it with `Hibana::DurableObjects`.
