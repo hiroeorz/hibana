@@ -29,11 +29,9 @@ module HostBridge
     end
 
     def run_d1_query(binding_name, sql, bindings, action)
-      unless ts_run_d1_query
-        raise "Host function 'ts_run_d1_query' is not registered"
-      end
-      result = ts_run_d1_query.apply(binding_name.to_s, sql, bindings, action).await
-      result.is_a?(String) ? result : result.to_s
+      ensure_host_function!("ts_run_d1_query", ts_run_d1_query)
+      payload = ts_run_d1_query.apply(binding_name.to_s, sql, bindings, action).await
+      parse_host_response(payload, context: "D1 query failed")
     end
 
     def http_fetch(request_payload)

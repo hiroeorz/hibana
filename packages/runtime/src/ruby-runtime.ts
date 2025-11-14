@@ -464,7 +464,7 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
           stmt,
           bindingsArray,
         ) as D1PreparedStatement
-        let results
+        let results: unknown
         const firstMethod = preparedStmt.first
         const allMethod = preparedStmt.all
         const runMethod = preparedStmt.run
@@ -492,10 +492,16 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
             results = await Reflect.apply(runMethod, preparedStmt, [])
             break
         }
-        return JSON.stringify(results)
-      } catch (e) {
-        const error = e instanceof Error ? e.message : String(e)
-        return JSON.stringify({ error })
+        return JSON.stringify({
+          ok: true,
+          result: results === undefined ? null : results,
+        })
+      } catch (rawError) {
+        const error = rawError instanceof Error ? rawError : new Error(String(rawError))
+        return JSON.stringify({
+          ok: false,
+          error: { message: error.message, name: error.name },
+        })
       }
     }
   }
