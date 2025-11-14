@@ -141,6 +141,12 @@ type SerializedQueueBatch = {
   messages: SerializedQueueMessage[]
 }
 
+type HostErrorPayload = {
+  message: string
+  name: string
+  stack?: string
+}
+
 type QueueMessageHandleRecord = {
   batchHandle: string
   message: QueueMessage<unknown>
@@ -154,6 +160,7 @@ type QueueBatchHandleRecord = {
 const queueMessageHandles = new Map<string, QueueMessageHandleRecord>()
 const queueBatchHandles = new Map<string, QueueBatchHandleRecord>()
 let queueHandleCounter = 0
+const HOST_ERROR_GENERIC_MESSAGE = "An internal error occurred"
 
 let rubyVmPromise: Promise<RubyVM> | null = null
 
@@ -409,6 +416,7 @@ export function createDurableObjectClass(
 
 function registerHostFunctions(vm: RubyVM, env: Env): void {
   const host = globalThis as HostGlobals
+  const redactHostErrors = shouldMaskHostError(env)
 
   if (typeof host.tsCallBinding !== "function") {
     host.tsCallBinding = async (
@@ -510,17 +518,15 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
     host.tsHttpFetch = async (payloadJson: string): Promise<string> => {
       try {
         const payload = parseHttpRequestPayload(payloadJson)
-        const result = await executeHttpFetch(payload)
+        const result = await executeHttpFetch(payload, {
+          redactStack: redactHostErrors,
+          genericMessage: HOST_ERROR_GENERIC_MESSAGE,
+        })
         return JSON.stringify(result)
       } catch (rawError) {
-        const error = rawError instanceof Error ? rawError : new Error(String(rawError))
         const fallback: HttpFetchResponsePayload = {
           ok: false,
-          error: {
-            message: error.message,
-            name: error.name,
-            stack: error.stack,
-          },
+          error: buildHostErrorPayload(rawError, env),
         }
         return JSON.stringify(fallback)
       }
@@ -587,15 +593,9 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
         const result = await Reflect.apply(methodRef, target, args)
         return JSON.stringify({ ok: true, result })
       } catch (rawError) {
-        const error =
-          rawError instanceof Error ? rawError : new Error(String(rawError))
         return JSON.stringify({
           ok: false,
-          error: {
-            message: error.message,
-            name: error.name,
-            stack: error.stack,
-          },
+          error: buildHostErrorPayload(rawError, env),
         })
       }
     }
@@ -603,7 +603,10 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
 
   if (typeof host.tsHtmlRewriterTransform !== "function") {
     host.tsHtmlRewriterTransform = async (payloadJson: string): Promise<string> => {
-      return transformHtmlWithRubyHandlers(vm, payloadJson)
+      return transformHtmlWithRubyHandlers(vm, payloadJson, {
+        redactStack: redactHostErrors,
+        genericMessage: HOST_ERROR_GENERIC_MESSAGE,
+      })
     }
   }
 
@@ -802,6 +805,38 @@ function buildQueryObject(
     query[key] = values.length > 1 ? values : values[0] ?? ""
   })
   return query
+}
+
+function buildHostErrorPayload(rawError: unknown, env: Env): HostErrorPayload {
+  const error = rawError instanceof Error ? rawError : new Error(String(rawError))
+  const redactDetails = shouldMaskHostError(env)
+  const payload: HostErrorPayload = {
+    message: redactDetails ? HOST_ERROR_GENERIC_MESSAGE : error.message,
+    name: error.name || "Error",
+  }
+  if (!redactDetails && error.stack) {
+    payload.stack = error.stack
+  }
+  return payload
+}
+
+function shouldMaskHostError(env: Env): boolean {
+  const normalized = resolveEnvironmentName(env)
+  return normalized === "production" || normalized === "prod"
+}
+
+function resolveEnvironmentName(env: Env): string | undefined {
+  if (!env || typeof env !== "object") {
+    return undefined
+  }
+  const record = env as Record<string, unknown>
+  for (const key of ["ENVIRONMENT", "NODE_ENV"]) {
+    const value = record[key]
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim().toLowerCase()
+    }
+  }
+  return undefined
 }
 
 function buildScheduledPayload(

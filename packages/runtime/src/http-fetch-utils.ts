@@ -107,6 +107,10 @@ export function inferResponseType(response: Response): "text" | "json" | "arrayB
 
 export async function executeHttpFetch(
   payload: HttpFetchRequestPayload,
+  options?: {
+    redactStack?: boolean
+    genericMessage?: string
+  },
 ): Promise<HttpFetchResponsePayload> {
   const controller =
     typeof payload.timeoutMs === "number" && payload.timeoutMs > 0
@@ -186,12 +190,15 @@ export async function executeHttpFetch(
       clearTimeout(timeoutId)
     }
     const error = rawError instanceof Error ? rawError : new Error(String(rawError))
+    const redactStack = options?.redactStack === true
     const result: HttpFetchErrorPayload = {
       ok: false,
       error: {
-        message: error.message,
+        message: redactStack
+          ? options?.genericMessage || "An internal error occurred"
+          : error.message,
         name: error.name,
-        stack: error.stack,
+        ...(redactStack ? {} : { stack: error.stack }),
       },
     }
     return result

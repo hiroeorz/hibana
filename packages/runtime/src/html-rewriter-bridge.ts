@@ -52,7 +52,14 @@ type HtmlRewriterInstance = {
 
 const BRIDGE_CACHE = new WeakMap<RubyVM, RubyBridge>()
 
-export async function transformHtmlWithRubyHandlers(vm: RubyVM, payloadJson: string): Promise<string> {
+export async function transformHtmlWithRubyHandlers(
+  vm: RubyVM,
+  payloadJson: string,
+  options?: {
+    redactStack?: boolean
+    genericMessage?: string
+  },
+): Promise<string> {
   try {
     const payload = JSON.parse(payloadJson) as TransformRequest
     const rewriter = createHtmlRewriter(payload.options)
@@ -72,11 +79,7 @@ export async function transformHtmlWithRubyHandlers(vm: RubyVM, payloadJson: str
     const error = rawError instanceof Error ? rawError : new Error(String(rawError))
     return JSON.stringify({
       ok: false,
-      error: {
-        message: error.message,
-        name: error.name,
-        stack: error.stack,
-      },
+      error: buildBridgeErrorPayload(error, options),
     })
   }
 }
@@ -118,6 +121,24 @@ function registerElementHandlers(
     const handler = buildElementHandler(vm, bridge, config)
     rewriter.on(config.selector, handler)
   }
+}
+
+function buildBridgeErrorPayload(
+  error: Error,
+  options?: {
+    redactStack?: boolean
+    genericMessage?: string
+  },
+): { message: string; name: string; stack?: string } {
+  const redactStack = options?.redactStack === true
+  const payload: { message: string; name: string; stack?: string } = {
+    message: redactStack ? options?.genericMessage || "An internal error occurred" : error.message,
+    name: error.name,
+  }
+  if (!redactStack && error.stack) {
+    payload.stack = error.stack
+  }
+  return payload
 }
 
 function registerDocumentHandlers(
