@@ -997,21 +997,25 @@ async function handleQueueMessageHostOp(payloadJson: string): Promise<string> {
     if (!record) {
       throw new Error(`Queue message handle '${handle}' is not active`)
     }
-    switch (payload.op) {
-      case "ack":
-        await maybeAwait(record.message.ack())
-        break
-      case "retry":
-        await maybeAwait(
-          record.message.retry({
-            delaySeconds: normalizeDelaySeconds(payload.delaySeconds),
-          }),
-        )
-        break
-      default:
-        throw new Error(`Unsupported queue message op '${payload.op}'`)
+    if (payload.op !== "ack" && payload.op !== "retry") {
+      throw new Error(`Unsupported queue message op '${payload.op}'`)
     }
-    queueMessageHandles.delete(handle)
+    try {
+      switch (payload.op) {
+        case "ack":
+          await maybeAwait(record.message.ack())
+          break
+        case "retry":
+          await maybeAwait(
+            record.message.retry({
+              delaySeconds: normalizeDelaySeconds(payload.delaySeconds),
+            }),
+          )
+          break
+      }
+    } finally {
+      queueMessageHandles.delete(handle)
+    }
     return JSON.stringify({ ok: true })
   } catch (error) {
     return JSON.stringify({
