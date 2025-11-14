@@ -172,6 +172,32 @@ get "/r2" do |c|
 end
 ```
 
+### Queue連携（送信）
+
+`app/app.rb`
+
+```ruby
+post "/jobs" do |c|
+  task = { id: SecureRandom.uuid, body: c.request_text }
+  c.env(:TASK_QUEUE).enqueue(task, metadata: { source: "api" })
+  c.text("queued #{task[:id]}", status: 202)
+end
+
+post "/jobs/bulk" do |c|
+  c.env(:TASK_QUEUE).send_batch([
+    { body: { id: "a", body: "first" }, delay_seconds: 15 },
+    { body: { id: "b", body: "second" } },
+  ])
+  c.text("queued batch", status: 202)
+end
+```
+
+- `_QUEUE` で終わるバインディング名は自動で `Hibana::Queues::Producer` にラップされ、`c.env(:TASK_QUEUE)` から `enqueue/send`・`send_batch`・`bulk_enqueue` を呼び出せます。
+- `Hash`/`Array`/`Struct` などは自動で JSON 化され `contentType = "json"` が付与されます。文字列はそのまま（既定で `contentType = "text"`）送信され、`metadata` のキー・値も文字列に揃えられます。
+- `delay_seconds:` で遅延を指定でき、`send_batch`/`bulk_enqueue` で複数メッセージをまとめて投入できます（各要素には `body` が必須）。
+- `_QUEUE` 以外の名前を使う場合は、起動時に `Hibana::Queues.register(:BACKGROUND_JOBS)` を一度呼び出すだけで同じラッパーを適用できます。
+- Cloudflare Queue が受け付ける `contentType` は `"json"`, `"text"`, `"bytes"`, `"v8"` のみです。Hibana 側で `application/json` などの別名を正規化し、該当しない値を指定した場合は実行前に `ArgumentError` で通知します。
+
 ### Durable Object 連携
 
 `app/durable/` 配下にクラスを置き、`Hibana::DurableObjects.register` でバインディング名を結びつけます。

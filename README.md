@@ -177,6 +177,32 @@ get "/r2" do |c|
 end
 ```
 
+### Queue Integration (Send)
+
+`app/app.rb`
+
+```ruby
+post "/jobs" do |c|
+  task = { id: SecureRandom.uuid, body: c.request_text }
+  c.env(:TASK_QUEUE).enqueue(task, metadata: { source: "api" })
+  c.text("queued #{task[:id]}", status: 202)
+end
+
+post "/jobs/bulk" do |c|
+  c.env(:TASK_QUEUE).send_batch([
+    { body: { id: "a", body: "first" }, delay_seconds: 15 },
+    { body: { id: "b", body: "second" } },
+  ])
+  c.text("queued batch", status: 202)
+end
+```
+
+- Bindings whose names end with `_QUEUE` automatically expose `Hibana::Queues::Producer`, so `c.env(:TASK_QUEUE)` returns an object with `enqueue`/`send`, `send_batch`, and `bulk_enqueue`.
+- Passing a `Hash`, `Array`, or `Struct` automatically serializes the payload to JSON with `contentType = "json"`. Strings are forwarded as-is (defaulting to `contentType = "text"`), while `metadata` keys/values are stringified for you.
+- Use `delay_seconds:` to defer delivery, and `send_batch`/`bulk_enqueue` when you want to push multiple messages in one call (each entry must include a `body`).
+- If your binding doesn’t follow the `_QUEUE` naming pattern, register it manually once during boot: `Hibana::Queues.register(:BACKGROUND_JOBS)`.
+- Cloudflare Queues accepts only `"json"`, `"text"`, `"bytes"`, or `"v8"` for `contentType`. Hibana normalizes common aliases (e.g. `application/json`) and raises an error if another value is requested to avoid runtime failures.
+
 ### Durable Object Integration
 
 Define your Durable Object class under `app/durable/` and register it with `Hibana::DurableObjects`.
