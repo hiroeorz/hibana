@@ -9,7 +9,8 @@ module HostBridge
       :ts_report_ruby_error,
       :ts_html_rewriter_transform,
       :ts_durable_object_storage_op,
-      :ts_durable_object_alarm_op
+      :ts_durable_object_alarm_op,
+      :ts_durable_object_stub_fetch
 
     def call(binding_name, method_name, *args)
       ensure_call_binding_registered!
@@ -111,6 +112,18 @@ module HostBridge
       parse_host_response(result)
     end
 
+    def durable_object_stub_fetch(binding_name, target, request_payload)
+      ensure_host_function!("ts_durable_object_stub_fetch", ts_durable_object_stub_fetch)
+      payload = {
+        binding: binding_name.to_s,
+        target: normalize_target(target),
+        request: request_payload || {},
+      }
+      payload_json = JSON.generate(payload)
+      result = ts_durable_object_stub_fetch.apply(payload_json)
+      parse_host_response(result)
+    end
+
     private
 
     def parse_host_response(result)
@@ -137,6 +150,11 @@ module HostBridge
       end
     rescue JSON::ParserError => e
       raise "Failed to parse Durable Object host response: #{e.message}"
+    end
+
+    def normalize_target(target)
+      return target if target.is_a?(Hash)
+      raise ArgumentError, "Durable Object target must be provided as a hash"
     end
   end
 end

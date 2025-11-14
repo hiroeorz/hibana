@@ -36,6 +36,10 @@ import {
   type DurableObjectStorageOpPayload,
   type DurableObjectAlarmOpPayload,
 } from "./durable-object-host"
+import {
+  runDurableObjectStubFetch,
+  type DurableObjectStubFetchPayload,
+} from "./durable-object-stub"
 
 type HostGlobals = typeof globalThis & {
   tsCallBinding?: (
@@ -61,6 +65,7 @@ type HostGlobals = typeof globalThis & {
     stateHandle: string,
     payloadJson: string,
   ) => Promise<string>
+  tsDurableObjectStubFetch?: (payloadJson: string) => Promise<string>
 }
 
 interface WorkerResponsePayload {
@@ -546,6 +551,22 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
     }
   }
 
+  if (typeof host.tsDurableObjectStubFetch !== "function") {
+    host.tsDurableObjectStubFetch = async (payloadJson: string): Promise<string> => {
+      try {
+        const payload = JSON.parse(payloadJson) as DurableObjectStubFetchPayload
+        const result = await runDurableObjectStubFetch(env, payload)
+        return JSON.stringify(result)
+      } catch (rawError) {
+        const error = rawError instanceof Error ? rawError : new Error(String(rawError))
+        return JSON.stringify({
+          ok: false,
+          error: { message: error.message, name: error.name },
+        })
+      }
+    }
+  }
+
   if (typeof host.tsReportRubyError !== "function") {
     host.tsReportRubyError = async (payloadJson: string): Promise<void> => {
       try {
@@ -589,6 +610,7 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
   HostBridge.call("ts_html_rewriter_transform=", vm.wrap(host.tsHtmlRewriterTransform))
   HostBridge.call("ts_durable_object_storage_op=", vm.wrap(host.tsDurableObjectStorageOp))
   HostBridge.call("ts_durable_object_alarm_op=", vm.wrap(host.tsDurableObjectAlarmOp))
+  HostBridge.call("ts_durable_object_stub_fetch=", vm.wrap(host.tsDurableObjectStubFetch))
 }
 
 function ensureRecord(

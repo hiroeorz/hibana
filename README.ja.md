@@ -172,6 +172,55 @@ get "/r2" do |c|
 end
 ```
 
+### Durable Object 連携
+
+`app/durable/` 配下にクラスを置き、`Hibana::DurableObjects.register` でバインディング名を結びつけます。
+
+`app/durable/counter.rb`
+
+```ruby
+class Counter < Hibana::DurableObject::Base
+  def fetch(_request)
+    current = storage.get("count").to_i
+    storage.put("count", current + 1)
+    json(count: current + 1)
+  end
+end
+
+Hibana::DurableObjects.register :COUNTER, Counter
+```
+
+通常ルートから DO を呼び出すためのヘルパーエンドポイント。
+
+`app/app.rb`
+
+```ruby
+get "/durable/counter" do |c|
+  result = c.env(:COUNTER)
+    .fetch(name: "global-counter")
+    .json do
+      post json: { action: "increment" }
+    end
+
+  c.json(result)
+rescue Hibana::DurableObject::Error => e
+  c.json({ error: e.message }, status: 500)
+end
+```
+
+`wrangler.toml`
+
+```toml
+[durable_objects]
+bindings = [{ name = "COUNTER", class_name = "Counter" }]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["Counter"]
+```
+
+テンプレートには `npm run build:durable` が同梱されており、`app/durable/**/*.rb` を検出して `setApplicationScripts` への追加や `createDurableObjectClass` のエクスポートを自動化します。`npm run dev` や `npm run build` を実行すると manifest が再生成されるため、ユーザーは Ruby ファイルの用意と wrangler 設定だけに集中できます。
+
 ### Workers AI 連携
 
 Workers AI との連携もできます。渡すパラメータはモデルによって異なるので注意してください。
