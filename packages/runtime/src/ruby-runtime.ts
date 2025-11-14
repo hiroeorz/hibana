@@ -141,6 +141,12 @@ type SerializedQueueBatch = {
   messages: SerializedQueueMessage[]
 }
 
+type HostErrorPayload = {
+  message: string
+  name: string
+  stack?: string
+}
+
 type QueueMessageHandleRecord = {
   batchHandle: string
   message: QueueMessage<unknown>
@@ -154,6 +160,7 @@ type QueueBatchHandleRecord = {
 const queueMessageHandles = new Map<string, QueueMessageHandleRecord>()
 const queueBatchHandles = new Map<string, QueueBatchHandleRecord>()
 let queueHandleCounter = 0
+const HOST_ERROR_GENERIC_MESSAGE = "An internal error occurred"
 
 let rubyVmPromise: Promise<RubyVM> | null = null
 
@@ -409,6 +416,7 @@ export function createDurableObjectClass(
 
 function registerHostFunctions(vm: RubyVM, env: Env): void {
   const host = globalThis as HostGlobals
+  const redactHostErrors = shouldMaskHostError(env)
 
   if (typeof host.tsCallBinding !== "function") {
     host.tsCallBinding = async (
@@ -464,7 +472,7 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
           stmt,
           bindingsArray,
         ) as D1PreparedStatement
-        let results
+        let results: unknown
         const firstMethod = preparedStmt.first
         const allMethod = preparedStmt.all
         const runMethod = preparedStmt.run
@@ -492,10 +500,16 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
             results = await Reflect.apply(runMethod, preparedStmt, [])
             break
         }
-        return JSON.stringify(results)
-      } catch (e) {
-        const error = e instanceof Error ? e.message : String(e)
-        return JSON.stringify({ error })
+        return JSON.stringify({
+          ok: true,
+          result: results === undefined ? null : results,
+        })
+      } catch (rawError) {
+        const error = rawError instanceof Error ? rawError : new Error(String(rawError))
+        return JSON.stringify({
+          ok: false,
+          error: { message: error.message, name: error.name },
+        })
       }
     }
   }
@@ -504,17 +518,15 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
     host.tsHttpFetch = async (payloadJson: string): Promise<string> => {
       try {
         const payload = parseHttpRequestPayload(payloadJson)
-        const result = await executeHttpFetch(payload)
+        const result = await executeHttpFetch(payload, {
+          redactStack: redactHostErrors,
+          genericMessage: HOST_ERROR_GENERIC_MESSAGE,
+        })
         return JSON.stringify(result)
       } catch (rawError) {
-        const error = rawError instanceof Error ? rawError : new Error(String(rawError))
         const fallback: HttpFetchResponsePayload = {
           ok: false,
-          error: {
-            message: error.message,
-            name: error.name,
-            stack: error.stack,
-          },
+          error: buildHostErrorPayload(rawError, env),
         }
         return JSON.stringify(fallback)
       }
@@ -581,15 +593,9 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
         const result = await Reflect.apply(methodRef, target, args)
         return JSON.stringify({ ok: true, result })
       } catch (rawError) {
-        const error =
-          rawError instanceof Error ? rawError : new Error(String(rawError))
         return JSON.stringify({
           ok: false,
-          error: {
-            message: error.message,
-            name: error.name,
-            stack: error.stack,
-          },
+          error: buildHostErrorPayload(rawError, env),
         })
       }
     }
@@ -597,7 +603,10 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
 
   if (typeof host.tsHtmlRewriterTransform !== "function") {
     host.tsHtmlRewriterTransform = async (payloadJson: string): Promise<string> => {
-      return transformHtmlWithRubyHandlers(vm, payloadJson)
+      return transformHtmlWithRubyHandlers(vm, payloadJson, {
+        redactStack: redactHostErrors,
+        genericMessage: HOST_ERROR_GENERIC_MESSAGE,
+      })
     }
   }
 
@@ -798,6 +807,38 @@ function buildQueryObject(
   return query
 }
 
+function buildHostErrorPayload(rawError: unknown, env: Env): HostErrorPayload {
+  const error = rawError instanceof Error ? rawError : new Error(String(rawError))
+  const redactDetails = shouldMaskHostError(env)
+  const payload: HostErrorPayload = {
+    message: redactDetails ? HOST_ERROR_GENERIC_MESSAGE : error.message,
+    name: error.name || "Error",
+  }
+  if (!redactDetails && error.stack) {
+    payload.stack = error.stack
+  }
+  return payload
+}
+
+function shouldMaskHostError(env: Env): boolean {
+  const normalized = resolveEnvironmentName(env)
+  return normalized === "production" || normalized === "prod"
+}
+
+function resolveEnvironmentName(env: Env): string | undefined {
+  if (!env || typeof env !== "object") {
+    return undefined
+  }
+  const record = env as Record<string, unknown>
+  for (const key of ["ENVIRONMENT", "NODE_ENV"]) {
+    const value = record[key]
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim().toLowerCase()
+    }
+  }
+  return undefined
+}
+
 function buildScheduledPayload(
   event: RuntimeScheduledEvent,
 ): Record<string, unknown> {
@@ -956,21 +997,25 @@ async function handleQueueMessageHostOp(payloadJson: string): Promise<string> {
     if (!record) {
       throw new Error(`Queue message handle '${handle}' is not active`)
     }
-    switch (payload.op) {
-      case "ack":
-        await maybeAwait(record.message.ack())
-        break
-      case "retry":
-        await maybeAwait(
-          record.message.retry({
-            delaySeconds: normalizeDelaySeconds(payload.delaySeconds),
-          }),
-        )
-        break
-      default:
-        throw new Error(`Unsupported queue message op '${payload.op}'`)
+    if (payload.op !== "ack" && payload.op !== "retry") {
+      throw new Error(`Unsupported queue message op '${payload.op}'`)
     }
-    queueMessageHandles.delete(handle)
+    try {
+      switch (payload.op) {
+        case "ack":
+          await maybeAwait(record.message.ack())
+          break
+        case "retry":
+          await maybeAwait(
+            record.message.retry({
+              delaySeconds: normalizeDelaySeconds(payload.delaySeconds),
+            }),
+          )
+          break
+      }
+    } finally {
+      queueMessageHandles.delete(handle)
+    }
     return JSON.stringify({ ok: true })
   } catch (error) {
     return JSON.stringify({
