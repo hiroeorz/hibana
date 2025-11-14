@@ -10,7 +10,9 @@ module HostBridge
       :ts_html_rewriter_transform,
       :ts_durable_object_storage_op,
       :ts_durable_object_alarm_op,
-      :ts_durable_object_stub_fetch
+      :ts_durable_object_stub_fetch,
+      :ts_queue_message_op,
+      :ts_queue_batch_op
 
     def call(binding_name, method_name, *args)
       ensure_call_binding_registered!
@@ -102,14 +104,14 @@ module HostBridge
       ensure_host_function!("ts_durable_object_storage_op", ts_durable_object_storage_op)
       payload_json = JSON.generate(payload || {})
       result = ts_durable_object_storage_op.apply(state_handle.to_s, payload_json)
-      parse_host_response(result)
+      parse_host_response(result, context: "Durable Object host operation failed")
     end
 
     def durable_object_alarm_op(state_handle, payload)
       ensure_host_function!("ts_durable_object_alarm_op", ts_durable_object_alarm_op)
       payload_json = JSON.generate(payload || {})
       result = ts_durable_object_alarm_op.apply(state_handle.to_s, payload_json)
-      parse_host_response(result)
+      parse_host_response(result, context: "Durable Object host operation failed")
     end
 
     def durable_object_stub_fetch(binding_name, target, request_payload)
@@ -121,12 +123,26 @@ module HostBridge
       }
       payload_json = JSON.generate(payload)
       result = ts_durable_object_stub_fetch.apply(payload_json)
-      parse_host_response(result)
+      parse_host_response(result, context: "Durable Object host operation failed")
+    end
+
+    def queue_message_op(payload)
+      ensure_host_function!("ts_queue_message_op", ts_queue_message_op)
+      payload_json = JSON.generate(payload || {})
+      result = ts_queue_message_op.apply(payload_json)
+      parse_host_response(result, context: "Queue message operation failed")
+    end
+
+    def queue_batch_op(payload)
+      ensure_host_function!("ts_queue_batch_op", ts_queue_batch_op)
+      payload_json = JSON.generate(payload || {})
+      result = ts_queue_batch_op.apply(payload_json)
+      parse_host_response(result, context: "Queue batch operation failed")
     end
 
     private
 
-    def parse_host_response(result)
+    def parse_host_response(result, context:)
       serialized =
         if result.respond_to?(:await)
           result.await
@@ -143,13 +159,13 @@ module HostBridge
         data["result"]
       elsif data.is_a?(Hash)
         error = data["error"] || {}
-        message = error["message"] || "Durable Object host operation failed"
+        message = error["message"] || context
         raise message
       else
-        raise "Durable Object host response is malformed"
+        raise "#{context}: response is malformed"
       end
     rescue JSON::ParserError => e
-      raise "Failed to parse Durable Object host response: #{e.message}"
+      raise "Failed to parse host response: #{e.message}"
     end
 
     def normalize_target(target)

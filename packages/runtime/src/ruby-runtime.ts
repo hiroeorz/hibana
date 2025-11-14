@@ -8,6 +8,7 @@ import contextScript from "./ruby/app/hibana/context.rb"
 import durableObjectScript from "./ruby/app/hibana/durable_object.rb"
 import cronScript from "./ruby/app/hibana/cron.rb"
 import kvClientScript from "./ruby/app/hibana/kv_client.rb"
+import queueClientScript from "./ruby/app/hibana/queue_client.rb"
 import d1ClientScript from "./ruby/app/hibana/d1_client.rb"
 import ormScript from "./ruby/app/hibana/orm.rb"
 import r2ClientScript from "./ruby/app/hibana/r2_client.rb"
@@ -66,6 +67,8 @@ type HostGlobals = typeof globalThis & {
     payloadJson: string,
   ) => Promise<string>
   tsDurableObjectStubFetch?: (payloadJson: string) => Promise<string>
+  tsQueueMessageOp?: (payloadJson: string) => Promise<string>
+  tsQueueBatchOp?: (payloadJson: string) => Promise<string>
 }
 
 interface WorkerResponsePayload {
@@ -99,6 +102,59 @@ type WorkersAiPayload = {
   [key: string]: unknown
 }
 
+type QueueRetryOptions = {
+  delaySeconds?: number
+}
+
+type QueueMessage<Body = unknown> = {
+  readonly id: string
+  readonly timestamp: Date | number
+  readonly body: Body
+  readonly attempts: number
+  ack(): void | Promise<void>
+  retry(options?: QueueRetryOptions): void | Promise<void>
+}
+
+type QueueMessageBatch<Body = unknown> = {
+  readonly queue: string
+  readonly messages: readonly QueueMessage<Body>[]
+  ackAll(): void | Promise<void>
+  retryAll(options?: QueueRetryOptions): void | Promise<void>
+}
+
+type SerializedQueueBody =
+  | { format: "text"; text: string }
+  | { format: "json"; json: string }
+
+type SerializedQueueMessage = {
+  handle: string
+  id: string
+  attempts: number
+  timestamp: number
+  body: SerializedQueueBody
+}
+
+type SerializedQueueBatch = {
+  binding: string | null
+  queue: string
+  batchHandle: string
+  messages: SerializedQueueMessage[]
+}
+
+type QueueMessageHandleRecord = {
+  batchHandle: string
+  message: QueueMessage<unknown>
+}
+
+type QueueBatchHandleRecord = {
+  batch: QueueMessageBatch<unknown>
+  messageHandles: string[]
+}
+
+const queueMessageHandles = new Map<string, QueueMessageHandleRecord>()
+const queueBatchHandles = new Map<string, QueueBatchHandleRecord>()
+let queueHandleCounter = 0
+
 let rubyVmPromise: Promise<RubyVM> | null = null
 
 async function setupRubyVM(env: Env): Promise<RubyVM> {
@@ -125,22 +181,23 @@ async function setupRubyVM(env: Env): Promise<RubyVM> {
       await evalRubyFile(vm, durableObjectScript, "app/hibana/durable_object.rb") // 5. Durable Object DSL
       await evalRubyFile(vm, cronScript, "app/hibana/cron.rb") // 6. Cron DSL
       await evalRubyFile(vm, kvClientScript, "app/hibana/kv_client.rb") // 7. KVクライアント
-      await evalRubyFile(vm, d1ClientScript, "app/hibana/d1_client.rb") // 8. D1クライアント
-      await evalRubyFile(vm, ormScript, "app/hibana/orm.rb") // 9. ORM
-      await evalRubyFile(vm, r2ClientScript, "app/hibana/r2_client.rb") // 10. R2クライアント
-      await evalRubyFile(vm, httpClientScript, "app/hibana/http_client.rb") // 11. HTTPクライアント
-      await evalRubyFile(vm, workersAiClientScript, "app/hibana/workers_ai_client.rb") // 12. Workers AIクライアント
-      await evalRubyFile(vm, staticServerScript, "app/hibana/static_server.rb") // 13. 静的サーバー
-      await evalRubyFile(vm, htmlRewriterScript, "app/hibana/html_rewriter.rb") // 14. HTMLRewriter
-      await registerTemplates(vm) // 15. テンプレート資材をロード
-      await registerStaticAssets(vm) // 16. 静的アセットをロード
+      await evalRubyFile(vm, queueClientScript, "app/hibana/queue_client.rb") // 8. Queueクライアント
+      await evalRubyFile(vm, d1ClientScript, "app/hibana/d1_client.rb") // 9. D1クライアント
+      await evalRubyFile(vm, ormScript, "app/hibana/orm.rb") // 10. ORM
+      await evalRubyFile(vm, r2ClientScript, "app/hibana/r2_client.rb") // 11. R2クライアント
+      await evalRubyFile(vm, httpClientScript, "app/hibana/http_client.rb") // 12. HTTPクライアント
+      await evalRubyFile(vm, workersAiClientScript, "app/hibana/workers_ai_client.rb") // 13. Workers AIクライアント
+      await evalRubyFile(vm, staticServerScript, "app/hibana/static_server.rb") // 14. 静的サーバー
+      await evalRubyFile(vm, htmlRewriterScript, "app/hibana/html_rewriter.rb") // 15. HTMLRewriter
+      await registerTemplates(vm) // 16. テンプレート資材をロード
+      await registerStaticAssets(vm) // 17. 静的アセットをロード
 
-      // 17. app/helpers 以下のファイルを順次読み込み
+      // 18. app/helpers 以下のファイルを順次読み込み
       for (const helper of getHelperScripts()) {
         await evalRubyFile(vm, helper.source, helper.filename) // app/helpers配下
       }
 
-      await evalRubyFile(vm, routingScript, "app/hibana/routing.rb") // 18. ルーティングDSL
+      await evalRubyFile(vm, routingScript, "app/hibana/routing.rb") // 19. ルーティングDSL
 
       for (const script of getApplicationScripts()) {
         await evalRubyFile(vm, script.source, script.filename)
@@ -220,6 +277,37 @@ export async function handleScheduled(
       payload.error?.message ||
       "Ruby cron handler failed without an error message"
     throw new Error(message)
+  }
+}
+
+export async function handleQueue(
+  env: Env,
+  batch: QueueMessageBatch<unknown>,
+  bindingName?: string | null,
+): Promise<void> {
+  const vm = await setupRubyVM(env)
+  const dispatcher = vm.eval("Hibana::Queues")
+  const { batchHandle, payload } = registerQueueBatch(batch, bindingName)
+  const bindingArg =
+    bindingName && bindingName.toString().length > 0
+      ? vm.eval(toRubyStringLiteral(bindingName.toString()))
+      : vm.eval("nil")
+  const payloadJson = JSON.stringify(payload)
+  const payloadArg = vm.eval(toRubyStringLiteral(payloadJson))
+  try {
+    const result = await dispatcher.callAsync(
+      "dispatch_queue",
+      bindingArg,
+      payloadArg,
+    )
+    const serialized =
+      result && typeof result.toString === "function" ? result.toString() : ""
+    if (!serialized) {
+      return
+    }
+    parseQueueResponse(serialized)
+  } finally {
+    cleanupQueueBatch(batchHandle)
   }
 }
 
@@ -567,6 +655,18 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
     }
   }
 
+  if (typeof host.tsQueueMessageOp !== "function") {
+    host.tsQueueMessageOp = async (payloadJson: string): Promise<string> => {
+      return handleQueueMessageHostOp(payloadJson)
+    }
+  }
+
+  if (typeof host.tsQueueBatchOp !== "function") {
+    host.tsQueueBatchOp = async (payloadJson: string): Promise<string> => {
+      return handleQueueBatchHostOp(payloadJson)
+    }
+  }
+
   if (typeof host.tsReportRubyError !== "function") {
     host.tsReportRubyError = async (payloadJson: string): Promise<void> => {
       try {
@@ -611,6 +711,8 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
   HostBridge.call("ts_durable_object_storage_op=", vm.wrap(host.tsDurableObjectStorageOp))
   HostBridge.call("ts_durable_object_alarm_op=", vm.wrap(host.tsDurableObjectAlarmOp))
   HostBridge.call("ts_durable_object_stub_fetch=", vm.wrap(host.tsDurableObjectStubFetch))
+  HostBridge.call("ts_queue_message_op=", vm.wrap(host.tsQueueMessageOp))
+  HostBridge.call("ts_queue_batch_op=", vm.wrap(host.tsQueueBatchOp))
 }
 
 function ensureRecord(
@@ -723,6 +825,231 @@ function buildScheduledPayload(
   }
 
   return payload
+}
+
+function registerQueueBatch(
+  batch: QueueMessageBatch<unknown>,
+  bindingName?: string | null,
+): { batchHandle: string; payload: SerializedQueueBatch } {
+  const batchHandle = nextQueueHandle("queue-batch")
+  const binding =
+    bindingName && bindingName.toString().length > 0
+      ? bindingName.toString()
+      : null
+  const messageHandles: string[] = []
+  const messages = (batch.messages || []).map((message, index) => {
+    const handle = `${batchHandle}:${index}`
+    messageHandles.push(handle)
+    queueMessageHandles.set(handle, {
+      batchHandle,
+      message,
+    })
+    return {
+      handle,
+      id: message.id?.toString() ?? "",
+      attempts: typeof message.attempts === "number" ? message.attempts : 0,
+      timestamp: toUnixMilliseconds(message.timestamp),
+      body: serializeQueueBody(message.body),
+    }
+  })
+  queueBatchHandles.set(batchHandle, {
+    batch,
+    messageHandles,
+  })
+  return {
+    batchHandle,
+    payload: {
+      binding,
+      queue: batch.queue ?? "",
+      batchHandle,
+      messages,
+    },
+  }
+}
+
+function cleanupQueueBatch(batchHandle: string): void {
+  const record = queueBatchHandles.get(batchHandle)
+  if (record) {
+    for (const handle of record.messageHandles) {
+      queueMessageHandles.delete(handle)
+    }
+    queueBatchHandles.delete(batchHandle)
+  }
+}
+
+function parseQueueResponse(serialized: string): void {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(serialized)
+  } catch (error) {
+    const reason =
+      error instanceof Error ? error.message : "Unknown JSON parse error"
+    throw new Error(
+      `Failed to parse Ruby queue response payload: ${reason}\nPayload: ${serialized}`,
+    )
+  }
+
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Ruby queue response payload is malformed")
+  }
+
+  const payload = parsed as {
+    status?: string
+    error?: { message?: string }
+    queue?: string
+  }
+
+  if (payload.status === "error") {
+    const message =
+      payload.error?.message ||
+      "Ruby queue handler failed without an error message"
+    throw new Error(message)
+  }
+
+  if (payload.status === "no_handler") {
+    const queueName = payload.queue || "unknown"
+    console.warn(
+      `[Hibana][queue] No Ruby handler matched queue '${queueName}'. Define queue binding: ... do |batch| end to handle it.`,
+    )
+  }
+}
+
+function toUnixMilliseconds(value: Date | number | undefined): number {
+  if (value instanceof Date) {
+    return value.getTime()
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value
+  }
+  return Date.now()
+}
+
+function serializeQueueBody(body: unknown): SerializedQueueBody {
+  if (typeof body === "string") {
+    return { format: "text", text: body }
+  }
+  try {
+    const json = JSON.stringify(body ?? null)
+    return { format: "json", json: json ?? "null" }
+  } catch {
+    return { format: "text", text: String(body ?? "") }
+  }
+}
+
+function nextQueueHandle(prefix: string): string {
+  queueHandleCounter += 1
+  return `${prefix}-${queueHandleCounter}-${Math.random().toString(36).slice(2)}`
+}
+
+async function handleQueueMessageHostOp(payloadJson: string): Promise<string> {
+  try {
+    const payload = JSON.parse(payloadJson) as {
+      handle?: string
+      op?: string
+      delaySeconds?: unknown
+    }
+    const handle = payload.handle
+    if (!handle) {
+      throw new Error("Queue message handle is required")
+    }
+    const record = queueMessageHandles.get(handle)
+    if (!record) {
+      throw new Error(`Queue message handle '${handle}' is not active`)
+    }
+    switch (payload.op) {
+      case "ack":
+        await maybeAwait(record.message.ack())
+        break
+      case "retry":
+        await maybeAwait(
+          record.message.retry({
+            delaySeconds: normalizeDelaySeconds(payload.delaySeconds),
+          }),
+        )
+        break
+      default:
+        throw new Error(`Unsupported queue message op '${payload.op}'`)
+    }
+    queueMessageHandles.delete(handle)
+    return JSON.stringify({ ok: true })
+  } catch (error) {
+    return JSON.stringify({
+      ok: false,
+      error: {
+        message: error instanceof Error ? error.message : String(error),
+      },
+    })
+  }
+}
+
+async function handleQueueBatchHostOp(payloadJson: string): Promise<string> {
+  try {
+    const payload = JSON.parse(payloadJson) as {
+      handle?: string
+      op?: string
+      delaySeconds?: unknown
+    }
+    const handle = payload.handle
+    if (!handle) {
+      throw new Error("Queue batch handle is required")
+    }
+    const record = queueBatchHandles.get(handle)
+    if (!record) {
+      throw new Error(`Queue batch handle '${handle}' is not active`)
+    }
+    switch (payload.op) {
+      case "ack_all":
+        await maybeAwait(record.batch.ackAll())
+        markBatchMessagesHandled(handle)
+        break
+      case "retry_all":
+        await maybeAwait(
+          record.batch.retryAll({
+            delaySeconds: normalizeDelaySeconds(payload.delaySeconds),
+          }),
+        )
+        markBatchMessagesHandled(handle)
+        break
+      default:
+        throw new Error(`Unsupported queue batch op '${payload.op}'`)
+    }
+    return JSON.stringify({ ok: true })
+  } catch (error) {
+    return JSON.stringify({
+      ok: false,
+      error: {
+        message: error instanceof Error ? error.message : String(error),
+      },
+    })
+  }
+}
+
+async function maybeAwait(result: void | Promise<void>): Promise<void> {
+  if (result && typeof (result as Promise<void>).then === "function") {
+    await result
+  }
+}
+
+function normalizeDelaySeconds(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined
+  }
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error("delaySeconds must be a non-negative number")
+  }
+  return Math.floor(parsed)
+}
+
+function markBatchMessagesHandled(batchHandle: string): void {
+  const record = queueBatchHandles.get(batchHandle)
+  if (!record) {
+    return
+  }
+  for (const handle of record.messageHandles) {
+    queueMessageHandles.delete(handle)
+  }
+  record.messageHandles = []
 }
 
 async function populateBodyOnContext(
