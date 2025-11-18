@@ -418,8 +418,22 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
   const host = globalThis as HostGlobals
   const redactHostErrors = shouldMaskHostError(env)
 
-  if (typeof host.tsCallBinding !== "function") {
-    host.tsCallBinding = async (
+  registerCallBindingHostFunction(host, env)
+  registerD1HostFunction(host, env)
+  registerHttpFetchHostFunction(host, env, redactHostErrors)
+  registerWorkersAiHostFunction(host, env)
+  registerHtmlRewriterHostFunction(host, vm, redactHostErrors)
+  registerDurableObjectHostFunctions(host, env)
+  registerQueueHostFunctions(host)
+  registerRubyErrorReporter(host)
+
+  vm.eval('require "js"')
+  registerHostBridgeBindings(vm, host)
+}
+
+function registerCallBindingHostFunction(host: HostGlobals, env: Env): void {
+  assignHostFnOnce(host, "tsCallBinding", () => {
+    return async (
       binding: string,
       method: string,
       args: unknown[],
@@ -442,11 +456,13 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
       }
       return result
     }
-  }
+  })
+}
 
+function registerD1HostFunction(host: HostGlobals, env: Env): void {
   // D1クエリを実行する汎用的な非同期関数
-  if (typeof host.tsRunD1Query !== "function") {
-    host.tsRunD1Query = async (
+  assignHostFnOnce(host, "tsRunD1Query", () => {
+    return async (
       binding: string,
       sql: string,
       bindings: unknown[],
@@ -512,10 +528,16 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
         })
       }
     }
-  }
+  })
+}
 
-  if (typeof host.tsHttpFetch !== "function") {
-    host.tsHttpFetch = async (payloadJson: string): Promise<string> => {
+function registerHttpFetchHostFunction(
+  host: HostGlobals,
+  env: Env,
+  redactHostErrors: boolean,
+): void {
+  assignHostFnOnce(host, "tsHttpFetch", () => {
+    return async (payloadJson: string): Promise<string> => {
       try {
         const payload = parseHttpRequestPayload(payloadJson)
         const result = await executeHttpFetch(payload, {
@@ -531,65 +553,17 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
         return JSON.stringify(fallback)
       }
     }
-  }
+  })
+}
 
-  if (typeof host.tsWorkersAiInvoke !== "function") {
-    host.tsWorkersAiInvoke = async (payloadJson: string): Promise<string> => {
+function registerWorkersAiHostFunction(host: HostGlobals, env: Env): void {
+  assignHostFnOnce(host, "tsWorkersAiInvoke", () => {
+    return async (payloadJson: string): Promise<string> => {
       try {
-        const payload = JSON.parse(payloadJson) as WorkersAiPayload
-        if (!payload || typeof payload !== "object") {
-          throw new Error("Workers AI payload must be an object")
-        }
-        const payloadRecord = payload as Record<string, unknown>
-        const bindingValue = payloadRecord["binding"]
-        const bindingName =
-          typeof bindingValue === "string" && bindingValue.length > 0
-            ? bindingValue
-            : null
-        if (!bindingName) {
-          throw new Error("Workers AI payload is missing a binding name")
-        }
-        const target = (env as Record<string, unknown>)[bindingName]
-        if (!target || typeof target !== "object") {
-          throw new Error(`Binding '${bindingName}' is not available`)
-        }
-        const methodValue = payloadRecord["method"]
-        const methodName =
-          typeof methodValue === "string" && methodValue.length > 0
-            ? methodValue
-            : "run"
-        const methodRef = (target as Record<string, unknown>)[methodName]
-        if (typeof methodRef !== "function") {
-          throw new Error(`Method '${methodName}' is not available on '${bindingName}'`)
-        }
-        let args: unknown[]
-        const argsValue = payloadRecord["args"]
-        if (Array.isArray(argsValue)) {
-          args = argsValue as unknown[]
-        } else {
-          const modelValue = payloadRecord["model"]
-          const model =
-            typeof modelValue === "string" && modelValue.length > 0
-              ? modelValue
-              : undefined
-          if (methodName === "run") {
-            if (!model) {
-              throw new Error("Workers AI payload requires a model name")
-            }
-            const inputs = ensureRecord(payloadRecord["payload"], "payload")
-            args = [model, inputs]
-          } else if (model !== undefined) {
-            const extraArgs =
-              Object.prototype.hasOwnProperty.call(payloadRecord, "payload")
-                ? [payloadRecord["payload"]]
-                : []
-            args = [model, ...extraArgs]
-          } else if (Object.prototype.hasOwnProperty.call(payloadRecord, "payload")) {
-            args = [payloadRecord["payload"]]
-          } else {
-            args = []
-          }
-        }
+        const payload = parseWorkersAiPayload(payloadJson)
+        const { bindingName, target } = resolveWorkersAiTarget(env, payload)
+        const { methodName, methodRef } = resolveWorkersAiMethod(target, bindingName, payload)
+        const args = resolveWorkersAiArgs(methodName, payload)
         const result = await Reflect.apply(methodRef, target, args)
         return JSON.stringify({ ok: true, result })
       } catch (rawError) {
@@ -599,19 +573,119 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
         })
       }
     }
-  }
+  })
+}
 
-  if (typeof host.tsHtmlRewriterTransform !== "function") {
-    host.tsHtmlRewriterTransform = async (payloadJson: string): Promise<string> => {
+function registerHtmlRewriterHostFunction(
+  host: HostGlobals,
+  vm: RubyVM,
+  redactHostErrors: boolean,
+): void {
+  assignHostFnOnce(host, "tsHtmlRewriterTransform", () => {
+    return async (payloadJson: string): Promise<string> => {
       return transformHtmlWithRubyHandlers(vm, payloadJson, {
         redactStack: redactHostErrors,
         genericMessage: HOST_ERROR_GENERIC_MESSAGE,
       })
     }
+  })
+}
+
+function parseWorkersAiPayload(payloadJson: string): Record<string, unknown> {
+  const payload = JSON.parse(payloadJson) as WorkersAiPayload
+  if (!payload || typeof payload !== "object") {
+    throw new Error("Workers AI payload must be an object")
+  }
+  return payload as Record<string, unknown>
+}
+
+function resolveWorkersAiTarget(
+  env: Env,
+  payload: Record<string, unknown>,
+): { bindingName: string; target: Record<string, unknown> } {
+  const bindingValue = payload["binding"]
+  const bindingName =
+    typeof bindingValue === "string" && bindingValue.length > 0
+      ? bindingValue
+      : null
+  if (!bindingName) {
+    throw new Error("Workers AI payload is missing a binding name")
+  }
+  const target = (env as Record<string, unknown>)[bindingName]
+  if (!target || typeof target !== "object") {
+    throw new Error(`Binding '${bindingName}' is not available`)
+  }
+  return { bindingName, target: target as Record<string, unknown> }
+}
+
+function resolveWorkersAiMethod(
+  target: Record<string, unknown>,
+  bindingName: string,
+  payload: Record<string, unknown>,
+): {
+  methodName: string
+  methodRef: (...methodArgs: unknown[]) => unknown
+} {
+  const methodValue = payload["method"]
+  const methodName =
+    typeof methodValue === "string" && methodValue.length > 0
+      ? methodValue
+      : "run"
+  const methodRef = target[methodName]
+  if (typeof methodRef !== "function") {
+    throw new Error(`Method '${methodName}' is not available on '${bindingName}'`)
+  }
+  return {
+    methodName,
+    methodRef: methodRef as (...methodArgs: unknown[]) => unknown,
+  }
+}
+
+function resolveWorkersAiArgs(
+  methodName: string,
+  payload: Record<string, unknown>,
+): unknown[] {
+  const argsValue = payload["args"]
+  if (Array.isArray(argsValue)) {
+    return argsValue as unknown[]
+  }
+  return buildDefaultWorkersAiArgs(methodName, payload)
+}
+
+function buildDefaultWorkersAiArgs(
+  methodName: string,
+  payload: Record<string, unknown>,
+): unknown[] {
+  const modelValue = payload["model"]
+  const model =
+    typeof modelValue === "string" && modelValue.length > 0
+      ? modelValue
+      : undefined
+
+  if (methodName === "run") {
+    if (!model) {
+      throw new Error("Workers AI payload requires a model name")
+    }
+    const inputs = ensureRecord(payload["payload"], "payload")
+    return [model, inputs]
   }
 
-  if (typeof host.tsDurableObjectStorageOp !== "function") {
-    host.tsDurableObjectStorageOp = async (
+  if (model !== undefined) {
+    const hasPayload = Object.prototype.hasOwnProperty.call(payload, "payload")
+    const extraArgs = hasPayload ? [payload["payload"]] : []
+    return [model, ...extraArgs]
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, "payload")) {
+    return [payload["payload"]]
+  }
+
+  return []
+}
+
+function registerDurableObjectHostFunctions(host: HostGlobals, env: Env): void {
+  assignHostFnOnce(host, "tsDurableObjectStorageOp", () => {
+    return async (
       stateHandle: string,
       payloadJson: string,
     ): Promise<string> => {
@@ -627,10 +701,10 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
         })
       }
     }
-  }
+  })
 
-  if (typeof host.tsDurableObjectAlarmOp !== "function") {
-    host.tsDurableObjectAlarmOp = async (
+  assignHostFnOnce(host, "tsDurableObjectAlarmOp", () => {
+    return async (
       stateHandle: string,
       payloadJson: string,
     ): Promise<string> => {
@@ -646,10 +720,10 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
         })
       }
     }
-  }
+  })
 
-  if (typeof host.tsDurableObjectStubFetch !== "function") {
-    host.tsDurableObjectStubFetch = async (payloadJson: string): Promise<string> => {
+  assignHostFnOnce(host, "tsDurableObjectStubFetch", () => {
+    return async (payloadJson: string): Promise<string> => {
       try {
         const payload = JSON.parse(payloadJson) as DurableObjectStubFetchPayload
         const result = await runDurableObjectStubFetch(env, payload)
@@ -662,22 +736,26 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
         })
       }
     }
-  }
+  })
+}
 
-  if (typeof host.tsQueueMessageOp !== "function") {
-    host.tsQueueMessageOp = async (payloadJson: string): Promise<string> => {
+function registerQueueHostFunctions(host: HostGlobals): void {
+  assignHostFnOnce(host, "tsQueueMessageOp", () => {
+    return async (payloadJson: string): Promise<string> => {
       return handleQueueMessageHostOp(payloadJson)
     }
-  }
+  })
 
-  if (typeof host.tsQueueBatchOp !== "function") {
-    host.tsQueueBatchOp = async (payloadJson: string): Promise<string> => {
+  assignHostFnOnce(host, "tsQueueBatchOp", () => {
+    return async (payloadJson: string): Promise<string> => {
       return handleQueueBatchHostOp(payloadJson)
     }
-  }
+  })
+}
 
-  if (typeof host.tsReportRubyError !== "function") {
-    host.tsReportRubyError = async (payloadJson: string): Promise<void> => {
+function registerRubyErrorReporter(host: HostGlobals): void {
+  assignHostFnOnce(host, "tsReportRubyError", () => {
+    return async (payloadJson: string): Promise<void> => {
       try {
         const payload = JSON.parse(payloadJson) as {
           message?: string
@@ -705,23 +783,39 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
         )
       }
     }
-  }
+  })
+}
 
-  vm.eval('require "js"')
-
+function registerHostBridgeBindings(vm: RubyVM, host: HostGlobals): void {
   const HostBridge = vm.eval("HostBridge")
+  const bindings: Array<[string, keyof HostGlobals]> = [
+    ["ts_call_binding=", "tsCallBinding"],
+    ["ts_run_d1_query=", "tsRunD1Query"],
+    ["ts_http_fetch=", "tsHttpFetch"],
+    ["ts_workers_ai_invoke=", "tsWorkersAiInvoke"],
+    ["ts_report_ruby_error=", "tsReportRubyError"],
+    ["ts_html_rewriter_transform=", "tsHtmlRewriterTransform"],
+    ["ts_durable_object_storage_op=", "tsDurableObjectStorageOp"],
+    ["ts_durable_object_alarm_op=", "tsDurableObjectAlarmOp"],
+    ["ts_durable_object_stub_fetch=", "tsDurableObjectStubFetch"],
+    ["ts_queue_message_op=", "tsQueueMessageOp"],
+    ["ts_queue_batch_op=", "tsQueueBatchOp"],
+  ]
 
-  HostBridge.call("ts_call_binding=", vm.wrap(host.tsCallBinding))
-  HostBridge.call("ts_run_d1_query=", vm.wrap(host.tsRunD1Query))
-  HostBridge.call("ts_http_fetch=", vm.wrap(host.tsHttpFetch))
-  HostBridge.call("ts_workers_ai_invoke=", vm.wrap(host.tsWorkersAiInvoke))
-  HostBridge.call("ts_report_ruby_error=", vm.wrap(host.tsReportRubyError))
-  HostBridge.call("ts_html_rewriter_transform=", vm.wrap(host.tsHtmlRewriterTransform))
-  HostBridge.call("ts_durable_object_storage_op=", vm.wrap(host.tsDurableObjectStorageOp))
-  HostBridge.call("ts_durable_object_alarm_op=", vm.wrap(host.tsDurableObjectAlarmOp))
-  HostBridge.call("ts_durable_object_stub_fetch=", vm.wrap(host.tsDurableObjectStubFetch))
-  HostBridge.call("ts_queue_message_op=", vm.wrap(host.tsQueueMessageOp))
-  HostBridge.call("ts_queue_batch_op=", vm.wrap(host.tsQueueBatchOp))
+  for (const [setter, key] of bindings) {
+    HostBridge.call(setter, vm.wrap(host[key]))
+  }
+}
+
+function assignHostFnOnce<K extends keyof HostGlobals>(
+  host: HostGlobals,
+  key: K,
+  factory: () => NonNullable<HostGlobals[K]>,
+): void {
+  if (typeof host[key] === "function") {
+    return
+  }
+  host[key] = factory() as HostGlobals[K]
 }
 
 function ensureRecord(
