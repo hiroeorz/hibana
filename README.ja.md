@@ -218,6 +218,32 @@ end
 - `batch.messages` は Ruby オブジェクトに変換され、`message.body` / `message.raw_body` / `message.timestamp` などへ直接アクセスできます。`ack!` すると再配信されません。
 - ブロックの外へ例外が伝播すると Cloudflare 側でバッチ全体がリトライされるため、成功したメッセージは事前に `ack!`、リトライさせたいメッセージには `retry!(delay_seconds:)` を呼んでから例外を投げてください。
 
+### Pub/Sub 連携（送信）
+
+`wrangler.toml`
+
+```toml
+[[pubsub_brokers]]
+name = "PUBSUB"
+broker = "your-broker-name"
+```
+
+`app/app.rb`
+
+```ruby
+post "/pubsub/publish" do |c|
+  broker = c.env(:PUBSUB)
+  payload = { message: "hello from pubsub", time: Time.now.to_i }
+
+  broker.publish("demo/topic", payload, qos: 1, retain: false)
+  c.text("published pubsub message")
+end
+```
+
+- `wrangler.toml` にブローカーをバインド（ここでは `PUBSUB`）して `c.env(:PUBSUB)` で取得します。
+- `publish(topic, body, content_type:, qos:, retain:, properties:)` は Workers API とほぼ同じ形。ハッシュ/配列/数値/真偽値/nil は既定で JSON 化、文字列はテキストとして送信します。
+- `qos: 0/1`、`retain: true/false` を必要に応じて指定し、不要ならオプションは省略できます。
+
 ### Durable Object 連携
 
 `app/durable/` 配下にクラスを置き、`Hibana::DurableObjects.register` でバインディング名を結びつけます。

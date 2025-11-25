@@ -223,6 +223,32 @@ end
 - `batch.ack_all!` / `retry_all!` wrap the Workers API, while each `message` exposes `body`, `raw_body`, `timestamp`, `ack!`, and `retry!(delay_seconds:)`.
 - Unhandled exceptions bubble up to Workers so the batch is retried—acknowledge successful work before raising, and call `retry!` when you want an individual message re-queued.
 
+### Pub/Sub Integration (Publish)
+
+`wrangler.toml`
+
+```toml
+[[pubsub_brokers]]
+name = "PUBSUB"
+broker = "your-broker-name"
+```
+
+`app/app.rb`
+
+```ruby
+post "/pubsub/publish" do |c|
+  broker = c.env(:PUBSUB)
+  payload = { message: "hello from pubsub", time: Time.now.to_i }
+
+  broker.publish("demo/topic", payload, qos: 1, retain: false)
+  c.text("published pubsub message")
+end
+```
+
+- Bind a broker in `wrangler.toml` (name `PUBSUB` here) and access it via `c.env(:PUBSUB)`.
+- `publish(topic, body, content_type:, qos:, retain:, properties:)` mirrors the Workers API; hashes/arrays/numbers/booleans/nil default to JSON, strings stay as text.
+- Set `qos: 0/1` and `retain: true/false` as needed; omit options when defaults are fine.
+
 ### Durable Object Integration
 
 Define your Durable Object class under `app/durable/` and register it with `Hibana::DurableObjects`.
