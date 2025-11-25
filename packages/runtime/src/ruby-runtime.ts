@@ -9,6 +9,8 @@ import durableObjectScript from "./ruby/app/hibana/durable_object.rb"
 import cronScript from "./ruby/app/hibana/cron.rb"
 import kvClientScript from "./ruby/app/hibana/kv_client.rb"
 import queueClientScript from "./ruby/app/hibana/queue_client.rb"
+import pubsubClientScript from "./ruby/app/hibana/pubsub_client.rb"
+import pubsubWebhookScript from "./ruby/app/hibana/pubsub_webhook.rb"
 import d1ClientScript from "./ruby/app/hibana/d1_client.rb"
 import ormScript from "./ruby/app/hibana/orm.rb"
 import r2ClientScript from "./ruby/app/hibana/r2_client.rb"
@@ -189,22 +191,24 @@ async function setupRubyVM(env: Env): Promise<RubyVM> {
       await evalRubyFile(vm, cronScript, "app/hibana/cron.rb") // 6. Cron DSL
       await evalRubyFile(vm, kvClientScript, "app/hibana/kv_client.rb") // 7. KVクライアント
       await evalRubyFile(vm, queueClientScript, "app/hibana/queue_client.rb") // 8. Queueクライアント
-      await evalRubyFile(vm, d1ClientScript, "app/hibana/d1_client.rb") // 9. D1クライアント
-      await evalRubyFile(vm, ormScript, "app/hibana/orm.rb") // 10. ORM
-      await evalRubyFile(vm, r2ClientScript, "app/hibana/r2_client.rb") // 11. R2クライアント
-      await evalRubyFile(vm, httpClientScript, "app/hibana/http_client.rb") // 12. HTTPクライアント
-      await evalRubyFile(vm, workersAiClientScript, "app/hibana/workers_ai_client.rb") // 13. Workers AIクライアント
-      await evalRubyFile(vm, staticServerScript, "app/hibana/static_server.rb") // 14. 静的サーバー
-      await evalRubyFile(vm, htmlRewriterScript, "app/hibana/html_rewriter.rb") // 15. HTMLRewriter
-      await registerTemplates(vm) // 16. テンプレート資材をロード
-      await registerStaticAssets(vm) // 17. 静的アセットをロード
+      await evalRubyFile(vm, pubsubClientScript, "app/hibana/pubsub_client.rb") // 9. Pub/Subクライアント
+      await evalRubyFile(vm, pubsubWebhookScript, "app/hibana/pubsub_webhook.rb") // 10. Pub/Sub webhookユーティリティ
+      await evalRubyFile(vm, d1ClientScript, "app/hibana/d1_client.rb") // 11. D1クライアント
+      await evalRubyFile(vm, ormScript, "app/hibana/orm.rb") // 12. ORM
+      await evalRubyFile(vm, r2ClientScript, "app/hibana/r2_client.rb") // 13. R2クライアント
+      await evalRubyFile(vm, httpClientScript, "app/hibana/http_client.rb") // 14. HTTPクライアント
+      await evalRubyFile(vm, workersAiClientScript, "app/hibana/workers_ai_client.rb") // 15. Workers AIクライアント
+      await evalRubyFile(vm, staticServerScript, "app/hibana/static_server.rb") // 16. 静的サーバー
+      await evalRubyFile(vm, htmlRewriterScript, "app/hibana/html_rewriter.rb") // 17. HTMLRewriter
+      await registerTemplates(vm) // 18. テンプレート資材をロード
+      await registerStaticAssets(vm) // 19. 静的アセットをロード
 
-      // 18. app/helpers 以下のファイルを順次読み込み
+      // 20. app/helpers 以下のファイルを順次読み込み
       for (const helper of getHelperScripts()) {
         await evalRubyFile(vm, helper.source, helper.filename) // app/helpers配下
       }
 
-      await evalRubyFile(vm, routingScript, "app/hibana/routing.rb") // 19. ルーティングDSL
+      await evalRubyFile(vm, routingScript, "app/hibana/routing.rb") // 21. ルーティングDSL
 
       for (const script of getApplicationScripts()) {
         await evalRubyFile(vm, script.source, script.filename)

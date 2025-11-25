@@ -218,6 +218,56 @@ end
 - `batch.messages` は Ruby オブジェクトに変換され、`message.body` / `message.raw_body` / `message.timestamp` などへ直接アクセスできます。`ack!` すると再配信されません。
 - ブロックの外へ例外が伝播すると Cloudflare 側でバッチ全体がリトライされるため、成功したメッセージは事前に `ack!`、リトライさせたいメッセージには `retry!(delay_seconds:)` を呼んでから例外を投げてください。
 
+### Pub/Sub 連携（送信）
+
+`wrangler.toml`
+
+```toml
+[[pubsub_brokers]]
+name = "PUBSUB"
+broker = "your-broker-name"
+```
+
+`app/app.rb`
+
+```ruby
+post "/pubsub/publish" do |c|
+  broker = c.env(:PUBSUB)
+  payload = { message: "hello from pubsub", time: Time.now.to_i }
+
+  broker.publish("demo/topic", payload, qos: 1, retain: false)
+  c.text("published pubsub message")
+end
+```
+
+- `wrangler.toml` にブローカーをバインド（ここでは `PUBSUB`）して `c.env(:PUBSUB)` で取得します。
+- `publish(topic, body, content_type:, qos:, retain:, properties:)` は Workers API とほぼ同じ形。ハッシュ/配列/数値/真偽値/nil は既定で JSON 化、文字列はテキストとして送信します。
+- `qos: 0/1`、`retain: true/false` を必要に応じて指定し、不要ならオプションは省略できます。
+
+### Pub/Sub 連携（Webhook / Push）
+
+ブローカー設定で Workers のURLへpushするようにすると、Pub/SubメッセージがHTTP POSTで届きます。Rubyでそのまま処理できます。
+
+`app/app.rb`
+
+```ruby
+post "/pubsub/webhook" do |c|
+  batch = Hibana::PubSub::Webhook.parse(c)
+
+  batch.messages.each do |msg|
+    puts "[pubsub] topic=#{msg.topic} body=#{msg.text || msg.payload.inspect}"
+    data = msg.json rescue nil
+    # TODO: ここで処理
+  end
+
+  c.text("ok") # 2xxでACK
+end
+```
+
+- ブローカー側でpush先（WorkersのHTTPSエンドポイント）を設定します。複数メッセージがまとめて届く前提で `batch.messages` を回してください。
+- `Webhook.parse` はJSONボディからmessages配列/単体を取り出し、base64指定時はデコードしたpayloadを`text/json`で扱えます。
+- 例外や非2xxを返すと失敗扱いでリトライが期待されます。処理完了時は必ず2xxを返してください。
+
 ### Durable Object 連携
 
 `app/durable/` 配下にクラスを置き、`Hibana::DurableObjects.register` でバインディング名を結びつけます。
