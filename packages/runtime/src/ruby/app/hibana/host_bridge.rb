@@ -15,6 +15,7 @@ module HostBridge
       :ts_run_d1_query,
       :ts_http_fetch,
       :ts_workers_ai_invoke,
+      :ts_vectorize_invoke,
       :ts_report_ruby_error,
       :ts_html_rewriter_transform,
       :ts_durable_object_storage_op,
@@ -65,6 +66,13 @@ module HostBridge
       else
         result
       end
+    end
+
+    def vectorize_invoke(payload)
+      ensure_host_function!("ts_vectorize_invoke", ts_vectorize_invoke)
+      payload_json = JSON.generate(payload || {})
+      result = ts_vectorize_invoke.apply(payload_json)
+      parse_host_response(result, context: "Vectorize operation failed")
     end
 
     def report_ruby_error(request_payload)

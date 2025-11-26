@@ -177,6 +177,73 @@ get "/r2" do |c|
 end
 ```
 
+### Vectorize Integration
+
+`app/app.rb`
+
+```ruby
+get "/vectorize-demo" do |c|
+  vectorize = c.env(:VECTORIZE)
+
+  vectorize.upsert(
+    vectors: [
+      { id: "doc-1", values: [0.1, 0.2, 0.3], metadata: { tag: "demo" } },
+    ],
+  )
+
+  result = vectorize.query(
+    top_k: 2,
+    vector: [0.1, 0.2, 0.3],
+    include_metadata: true,
+    include_values: false,
+  )
+
+  c.json(result[:matches])
+end
+```
+
+- `c.env(:VECTORIZE)` は `VECTORIZE` で終わるバインディングを自動で Ruby クライアントに変換します（`wrangler.toml` の `index_name` が紐づいた1インデックス用）。
+- `upsert` は `vectors`（`id`/`values`/`metadata`）を受け取り、`query` は `top_k` と検索ベクトルを指定します。削除は `vectorize.delete(ids: [\"doc-1\"])` を利用できます。
+
+#### Workers AI + Vectorize (multilingual)
+
+`wrangler vectorize create my-index --dimensions 1024 --metric cosine` でインデックスを作成し、`wrangler.toml` に `[[vectorize]] binding = "VECTORIZE" index_name = "my-index"` を追加してください。
+
+`app/app.rb`
+
+```ruby
+get "/vectorize-demo" do |c|
+  vectorize = c.env(:VECTORIZE)
+  ai = c.env(:AI)
+  model = "@cf/baai/bge-m3" # 1024 dimensions, multilingual
+
+  doc_text = "Vectorize multilingual text with Workers AI."
+  doc_embed = ai.run(model: model, payload: { text: [doc_text] })
+  doc_vector = doc_embed["data"][0]
+
+  vectorize.upsert(
+    vectors: [
+      { id: "doc-1", values: doc_vector, metadata: { lang: "ja", note: "demo" } },
+    ],
+  )
+
+  query_text = "What does this demo do?"
+  query_embed = ai.run(model: model, payload: { text: [query_text] })
+  query_vector = query_embed["data"][0]
+
+  result = vectorize.query(
+    top_k: 2,
+    vector: query_vector,
+    include_metadata: true,
+    include_values: false,
+  )
+
+  c.json(result[:matches])
+end
+```
+
+- Upsert/Query とも同じモデルの埋め込みを使って次元を揃えてください。`@cf/baai/bge-m3` は 1024 次元です。
+
 ### Queue Integration (Send)
 
 `app/app.rb`

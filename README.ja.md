@@ -172,6 +172,46 @@ get "/r2" do |c|
 end
 ```
 
+### Vectorize連携（Workers AIで埋め込みを生成）
+
+`wrangler vectorize create my-index --dimensions 1024 --metric cosine` でインデックスを作成し、`wrangler.toml` に `[[vectorize]] binding = "VECTORIZE" index_name = "my-index"` を追加してください。
+
+`app/app.rb`
+
+```ruby
+get "/vectorize-demo" do |c|
+  vectorize = c.env(:VECTORIZE)
+  ai = c.env(:AI)
+  model = "@cf/baai/bge-m3" # 1024次元・多言語対応
+
+  doc_text = "多言語のテキストをベクトル化して検索します。"
+  doc_embed = ai.run(model: model, payload: { text: [doc_text] })
+  doc_vector = doc_embed["data"][0]
+
+  vectorize.upsert(
+    vectors: [
+      { id: "doc-1", values: doc_vector, metadata: { lang: "ja", note: "demo" } },
+    ],
+  )
+
+  query_text = "このデモは何をしますか？"
+  query_embed = ai.run(model: model, payload: { text: [query_text] })
+  query_vector = query_embed["data"][0]
+
+  result = vectorize.query(
+    top_k: 2,
+    vector: query_vector,
+    include_metadata: true,
+    include_values: false,
+  )
+
+  c.json(result[:matches])
+end
+```
+
+- `@cf/baai/bge-m3` は 1024 次元なので、インデックスの次元も合わせてください。
+- `c.env(:VECTORIZE)` で Vectorize クライアントを取得し、同じモデルの埋め込みを upsert/query に利用します。
+
 ### Queue連携（送信）
 
 `app/app.rb`
