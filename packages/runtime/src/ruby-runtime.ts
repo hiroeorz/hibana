@@ -12,6 +12,7 @@ import queueClientScript from "./ruby/app/hibana/queue_client.rb"
 import d1ClientScript from "./ruby/app/hibana/d1_client.rb"
 import ormScript from "./ruby/app/hibana/orm.rb"
 import r2ClientScript from "./ruby/app/hibana/r2_client.rb"
+import vectorizeClientScript from "./ruby/app/hibana/vectorize_client.rb"
 import httpClientScript from "./ruby/app/hibana/http_client.rb"
 import workersAiClientScript from "./ruby/app/hibana/workers_ai_client.rb"
 import staticServerScript from "./ruby/app/hibana/static_server.rb"
@@ -56,6 +57,7 @@ type HostGlobals = typeof globalThis & {
   ) => Promise<string>
   tsHttpFetch?: (payloadJson: string) => Promise<string>
   tsWorkersAiInvoke?: (payloadJson: string) => Promise<string>
+  tsVectorizeInvoke?: (payloadJson: string) => Promise<string>
   tsReportRubyError?: (payloadJson: string) => Promise<void>
   tsHtmlRewriterTransform?: (payloadJson: string) => Promise<string>
   tsDurableObjectStorageOp?: (
@@ -157,6 +159,12 @@ type QueueBatchHandleRecord = {
   messageHandles: string[]
 }
 
+type VectorizeInvokePayload = {
+  binding?: string
+  action?: string
+  params?: Record<string, unknown>
+}
+
 const queueMessageHandles = new Map<string, QueueMessageHandleRecord>()
 const queueBatchHandles = new Map<string, QueueBatchHandleRecord>()
 let queueHandleCounter = 0
@@ -192,19 +200,20 @@ async function setupRubyVM(env: Env): Promise<RubyVM> {
       await evalRubyFile(vm, d1ClientScript, "app/hibana/d1_client.rb") // 9. D1クライアント
       await evalRubyFile(vm, ormScript, "app/hibana/orm.rb") // 10. ORM
       await evalRubyFile(vm, r2ClientScript, "app/hibana/r2_client.rb") // 11. R2クライアント
-      await evalRubyFile(vm, httpClientScript, "app/hibana/http_client.rb") // 12. HTTPクライアント
-      await evalRubyFile(vm, workersAiClientScript, "app/hibana/workers_ai_client.rb") // 13. Workers AIクライアント
-      await evalRubyFile(vm, staticServerScript, "app/hibana/static_server.rb") // 14. 静的サーバー
-      await evalRubyFile(vm, htmlRewriterScript, "app/hibana/html_rewriter.rb") // 15. HTMLRewriter
-      await registerTemplates(vm) // 16. テンプレート資材をロード
-      await registerStaticAssets(vm) // 17. 静的アセットをロード
+      await evalRubyFile(vm, vectorizeClientScript, "app/hibana/vectorize_client.rb") // 12. Vectorizeクライアント
+      await evalRubyFile(vm, httpClientScript, "app/hibana/http_client.rb") // 13. HTTPクライアント
+      await evalRubyFile(vm, workersAiClientScript, "app/hibana/workers_ai_client.rb") // 14. Workers AIクライアント
+      await evalRubyFile(vm, staticServerScript, "app/hibana/static_server.rb") // 15. 静的サーバー
+      await evalRubyFile(vm, htmlRewriterScript, "app/hibana/html_rewriter.rb") // 16. HTMLRewriter
+      await registerTemplates(vm) // 17. テンプレート資材をロード
+      await registerStaticAssets(vm) // 18. 静的アセットをロード
 
-      // 18. app/helpers 以下のファイルを順次読み込み
+      // 19. app/helpers 以下のファイルを順次読み込み
       for (const helper of getHelperScripts()) {
         await evalRubyFile(vm, helper.source, helper.filename) // app/helpers配下
       }
 
-      await evalRubyFile(vm, routingScript, "app/hibana/routing.rb") // 19. ルーティングDSL
+      await evalRubyFile(vm, routingScript, "app/hibana/routing.rb") // 20. ルーティングDSL
 
       for (const script of getApplicationScripts()) {
         await evalRubyFile(vm, script.source, script.filename)
@@ -422,6 +431,7 @@ function registerHostFunctions(vm: RubyVM, env: Env): void {
   registerD1HostFunction(host, env)
   registerHttpFetchHostFunction(host, env, redactHostErrors)
   registerWorkersAiHostFunction(host, env)
+  registerVectorizeHostFunction(host, env)
   registerHtmlRewriterHostFunction(host, vm, redactHostErrors)
   registerDurableObjectHostFunctions(host, env)
   registerQueueHostFunctions(host)
@@ -576,6 +586,24 @@ function registerWorkersAiHostFunction(host: HostGlobals, env: Env): void {
   })
 }
 
+function registerVectorizeHostFunction(host: HostGlobals, env: Env): void {
+  assignHostFnOnce(host, "tsVectorizeInvoke", () => {
+    return async (payloadJson: string): Promise<string> => {
+      try {
+        const payload = parseVectorizePayload(payloadJson)
+        const binding = resolveVectorizeBinding(env, payload)
+        const result = await dispatchVectorizeAction(binding, payload)
+        return JSON.stringify({ ok: true, result })
+      } catch (rawError) {
+        return JSON.stringify({
+          ok: false,
+          error: buildHostErrorPayload(rawError, env),
+        })
+      }
+    }
+  })
+}
+
 function registerHtmlRewriterHostFunction(
   host: HostGlobals,
   vm: RubyVM,
@@ -681,6 +709,132 @@ function buildDefaultWorkersAiArgs(
   }
 
   return []
+}
+
+function parseVectorizePayload(payloadJson: string): VectorizeInvokePayload {
+  const payload = JSON.parse(payloadJson) as VectorizeInvokePayload
+  if (!payload || typeof payload !== "object") {
+    throw new Error("Vectorize payload must be an object")
+  }
+  return payload
+}
+
+function resolveVectorizeBinding(
+  env: Env,
+  payload: VectorizeInvokePayload,
+): { bindingName: string; client: Record<string, unknown> } {
+  const bindingValue = payload.binding
+  const bindingName =
+    typeof bindingValue === "string" && bindingValue.length > 0
+      ? bindingValue
+      : null
+  if (!bindingName) {
+    throw new Error("Vectorize payload is missing a binding name")
+  }
+  const client = (env as Record<string, unknown>)[bindingName]
+  if (!client || typeof client !== "object") {
+    throw new Error(`Binding '${bindingName}' is not available`)
+  }
+  return { bindingName, client: client as Record<string, unknown> }
+}
+
+function dispatchVectorizeAction(
+  binding: { bindingName: string; client: Record<string, unknown> },
+  payload: VectorizeInvokePayload,
+): unknown {
+  const action = typeof payload.action === "string" ? payload.action : ""
+  const params = ensureVectorizeParams(payload.params)
+  switch (action) {
+    case "upsert":
+      return callVectorizeMethod(binding, "upsert", [
+        requireArray(params, "vectors"),
+      ])
+    case "query":
+      return callVectorizeMethod(binding, "query", buildVectorizeQueryArgs(params))
+    case "delete":
+      return callVectorizeMethod(binding, "delete", [
+        requireArray(params, "ids"),
+      ])
+    default:
+      throw new Error(`Unsupported Vectorize action '${action}'`)
+  }
+}
+
+function callVectorizeMethod(
+  binding: { bindingName: string; client: Record<string, unknown> },
+  methodName: string,
+  args: unknown[],
+): unknown {
+  const method = binding.client[methodName]
+  if (typeof method !== "function") {
+    throw new Error(`Method '${methodName}' is not available on '${binding.bindingName}'`)
+  }
+  return Reflect.apply(method as (...methodArgs: unknown[]) => unknown, binding.client, args)
+}
+
+function requireString(value: Record<string, unknown>, key: string): string {
+  const raw = value[key]
+  if (typeof raw !== "string" || raw.length === 0) {
+    throw new Error(`Vectorize payload is missing required string '${key}'`)
+  }
+  return raw
+}
+
+function requireArray(value: Record<string, unknown>, key: string): unknown[] {
+  const raw = value[key]
+  if (!Array.isArray(raw)) {
+    throw new Error(`Vectorize payload is missing required array '${key}'`)
+  }
+  return raw
+}
+
+function ensureVectorizeParams(value: unknown): Record<string, unknown> {
+  if (value === undefined || value === null) {
+    return {}
+  }
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>
+  }
+  throw new Error("Vectorize payload 'params' must be provided as an object")
+}
+
+function buildVectorizeQueryArgs(
+  params: Record<string, unknown>,
+): [unknown[], Record<string, unknown>?] {
+  const vector = requireArray(params, "vector")
+  const options: Record<string, unknown> = {}
+
+  if ("topK" in params) {
+    options.topK = requirePositiveInteger(params, "topK")
+  }
+  if ("includeMetadata" in params) {
+    options.includeMetadata = Boolean(params["includeMetadata"])
+  }
+  if ("includeValues" in params) {
+    options.includeValues = Boolean(params["includeValues"])
+  }
+  if ("filter" in params && params["filter"] !== undefined) {
+    const filter = params["filter"]
+    if (filter && typeof filter === "object" && !Array.isArray(filter)) {
+      options.filter = filter
+    } else {
+      throw new Error("Vectorize payload 'filter' must be an object when provided")
+    }
+  }
+
+  if (Object.keys(options).length === 0) {
+    return [vector]
+  }
+  return [vector, options]
+}
+
+function requirePositiveInteger(value: Record<string, unknown>, key: string): number {
+  const raw = value[key]
+  const parsed = Number(raw)
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`Vectorize payload '${key}' must be a positive integer`)
+  }
+  return parsed
 }
 
 function registerDurableObjectHostFunctions(host: HostGlobals, env: Env): void {
@@ -793,6 +947,7 @@ function registerHostBridgeBindings(vm: RubyVM, host: HostGlobals): void {
     ["ts_run_d1_query=", "tsRunD1Query"],
     ["ts_http_fetch=", "tsHttpFetch"],
     ["ts_workers_ai_invoke=", "tsWorkersAiInvoke"],
+    ["ts_vectorize_invoke=", "tsVectorizeInvoke"],
     ["ts_report_ruby_error=", "tsReportRubyError"],
     ["ts_html_rewriter_transform=", "tsHtmlRewriterTransform"],
     ["ts_durable_object_storage_op=", "tsDurableObjectStorageOp"],

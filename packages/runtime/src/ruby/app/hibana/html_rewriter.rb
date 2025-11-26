@@ -219,9 +219,10 @@ module Hibana
       }.freeze
 
       def determine(handler, allowed)
-        allowed.filter_map do |method_name|
+        allowed.each_with_object([]) do |method_name, acc|
           next unless handler.respond_to?(method_name)
-          METHOD_TO_EVENT[method_name]
+          event_name = METHOD_TO_EVENT[method_name]
+          acc << event_name if event_name
         end
       end
     end
