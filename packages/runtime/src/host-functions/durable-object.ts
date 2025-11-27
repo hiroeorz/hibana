@@ -1,5 +1,5 @@
 import type { Env } from "../env"
-import { wrapHostOperation } from "../runtime-types"
+import { createErrorResponse } from "../runtime-types"
 import {
   runDurableObjectStorageOp,
   runDurableObjectAlarmOp,
@@ -13,31 +13,43 @@ import {
 import type { HostGlobals } from "./types"
 import { assignHostFnOnce } from "./types"
 
+// Note: Durable Object functions (runDurableObjectStorageOp, runDurableObjectAlarmOp,
+// runDurableObjectStubFetch) already return {ok, result/error} format internally,
+// so we must NOT use wrapHostOperation here to avoid double-wrapping.
 export function registerDurableObjectHostFunctions(host: HostGlobals, env: Env): void {
   assignHostFnOnce(host, "tsDurableObjectStorageOp", () => {
     return async (stateHandle: string, payloadJson: string): Promise<string> => {
-      return wrapHostOperation(async () => {
+      try {
         const payload = JSON.parse(payloadJson) as DurableObjectStorageOpPayload
-        return await runDurableObjectStorageOp(stateHandle, payload)
-      })
+        const result = await runDurableObjectStorageOp(stateHandle, payload)
+        return JSON.stringify(result)
+      } catch (rawError) {
+        return createErrorResponse(rawError)
+      }
     }
   })
 
   assignHostFnOnce(host, "tsDurableObjectAlarmOp", () => {
     return async (stateHandle: string, payloadJson: string): Promise<string> => {
-      return wrapHostOperation(async () => {
+      try {
         const payload = JSON.parse(payloadJson) as DurableObjectAlarmOpPayload
-        return await runDurableObjectAlarmOp(stateHandle, payload)
-      })
+        const result = await runDurableObjectAlarmOp(stateHandle, payload)
+        return JSON.stringify(result)
+      } catch (rawError) {
+        return createErrorResponse(rawError)
+      }
     }
   })
 
   assignHostFnOnce(host, "tsDurableObjectStubFetch", () => {
     return async (payloadJson: string): Promise<string> => {
-      return wrapHostOperation(async () => {
+      try {
         const payload = JSON.parse(payloadJson) as DurableObjectStubFetchPayload
-        return await runDurableObjectStubFetch(env, payload)
-      })
+        const result = await runDurableObjectStubFetch(env, payload)
+        return JSON.stringify(result)
+      } catch (rawError) {
+        return createErrorResponse(rawError)
+      }
     }
   })
 }
