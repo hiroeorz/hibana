@@ -18,159 +18,36 @@ import workersAiClientScript from "./ruby/app/hibana/workers_ai_client.rb"
 import staticServerScript from "./ruby/app/hibana/static_server.rb"
 import routingScript from "./ruby/app/hibana/routing.rb"
 import htmlRewriterScript from "./ruby/app/hibana/html_rewriter.rb"
-import {
-  executeHttpFetch,
-  parseHttpRequestPayload,
-  type HttpFetchResponsePayload,
-} from "./http-fetch-utils"
 import { getHelperScripts } from "./helper-registry"
 import { getApplicationScripts } from "./script-registry"
 import { getTemplateAssets } from "./template-registry"
 import { getStaticAssets } from "./static-registry"
-import { transformHtmlWithRubyHandlers } from "./html-rewriter-bridge"
 import { toRubyStringLiteral } from "./ruby-utils"
 import {
   registerDurableObjectState,
-  runDurableObjectStorageOp,
-  runDurableObjectAlarmOp,
   type DurableObjectMetadata,
   type DurableObjectStateLike,
-  type DurableObjectStorageOpPayload,
-  type DurableObjectAlarmOpPayload,
 } from "./durable-object-host"
+import { registerHostFunctions } from "./host-functions"
+import { QueueHandleManager } from "./queue-handle-manager"
 import {
-  runDurableObjectStubFetch,
-  type DurableObjectStubFetchPayload,
-} from "./durable-object-stub"
+  type WorkerResponsePayload,
+  type RuntimeScheduledEvent,
+  type QueueMessageBatch,
+  METHODS_WITH_BODY,
+} from "./runtime-types"
 
-type HostGlobals = typeof globalThis & {
-  tsCallBinding?: (
-    binding: string,
-    method: string,
-    args: unknown[],
-  ) => Promise<unknown>
-  tsRunD1Query?: (
-    binding: string,
-    sql: string,
-    bindings: unknown[],
-    action: "first" | "all" | "run",
-  ) => Promise<string>
-  tsHttpFetch?: (payloadJson: string) => Promise<string>
-  tsWorkersAiInvoke?: (payloadJson: string) => Promise<string>
-  tsVectorizeInvoke?: (payloadJson: string) => Promise<string>
-  tsReportRubyError?: (payloadJson: string) => Promise<void>
-  tsHtmlRewriterTransform?: (payloadJson: string) => Promise<string>
-  tsDurableObjectStorageOp?: (
-    stateHandle: string,
-    payloadJson: string,
-  ) => Promise<string>
-  tsDurableObjectAlarmOp?: (
-    stateHandle: string,
-    payloadJson: string,
-  ) => Promise<string>
-  tsDurableObjectStubFetch?: (payloadJson: string) => Promise<string>
-  tsQueueMessageOp?: (payloadJson: string) => Promise<string>
-  tsQueueBatchOp?: (payloadJson: string) => Promise<string>
-}
-
-interface WorkerResponsePayload {
-  body: string
-  status: number
-  headers: Record<string, string>
-}
-
-export interface RuntimeScheduledEvent {
-  cron: string
-  scheduledTime: number
-  type?: string
-  retryCount?: number
-  noRetry?: boolean
-  [key: string]: unknown
-}
-
-type D1PreparedStatement = {
-  bind: (...args: unknown[]) => D1PreparedStatement
-  first: () => Promise<unknown>
-  all: () => Promise<{ results: unknown } | unknown>
-  run: () => Promise<unknown>
-}
-
-type WorkersAiPayload = {
-  binding: string
-  method?: string
-  args?: unknown[]
-  model?: string
-  payload?: unknown
-  [key: string]: unknown
-}
-
-type QueueRetryOptions = {
-  delaySeconds?: number
-}
-
-type QueueMessage<Body = unknown> = {
-  readonly id: string
-  readonly timestamp: Date | number
-  readonly body: Body
-  readonly attempts: number
-  ack(): void | Promise<void>
-  retry(options?: QueueRetryOptions): void | Promise<void>
-}
-
-type QueueMessageBatch<Body = unknown> = {
-  readonly queue: string
-  readonly messages: readonly QueueMessage<Body>[]
-  ackAll(): void | Promise<void>
-  retryAll(options?: QueueRetryOptions): void | Promise<void>
-}
-
-type SerializedQueueBody =
-  | { format: "text"; text: string }
-  | { format: "json"; json: string }
-
-type SerializedQueueMessage = {
-  handle: string
-  id: string
-  attempts: number
-  timestamp: number
-  body: SerializedQueueBody
-}
-
-type SerializedQueueBatch = {
-  binding: string | null
-  queue: string
-  batchHandle: string
-  messages: SerializedQueueMessage[]
-}
-
-type HostErrorPayload = {
-  message: string
-  name: string
-  stack?: string
-}
-
-type QueueMessageHandleRecord = {
-  batchHandle: string
-  message: QueueMessage<unknown>
-}
-
-type QueueBatchHandleRecord = {
-  batch: QueueMessageBatch<unknown>
-  messageHandles: string[]
-}
-
-type VectorizeInvokePayload = {
-  binding?: string
-  action?: string
-  params?: Record<string, unknown>
-}
-
-const queueMessageHandles = new Map<string, QueueMessageHandleRecord>()
-const queueBatchHandles = new Map<string, QueueBatchHandleRecord>()
-let queueHandleCounter = 0
-const HOST_ERROR_GENERIC_MESSAGE = "An internal error occurred"
+export type { RuntimeScheduledEvent, WorkerResponsePayload }
 
 let rubyVmPromise: Promise<RubyVM> | null = null
+let sharedQueueManager: QueueHandleManager | null = null
+
+function getQueueManager(): QueueHandleManager {
+  if (!sharedQueueManager) {
+    sharedQueueManager = new QueueHandleManager()
+  }
+  return sharedQueueManager
+}
 
 async function setupRubyVM(env: Env): Promise<RubyVM> {
   if (!rubyVmPromise) {
@@ -188,32 +65,32 @@ async function setupRubyVM(env: Env): Promise<RubyVM> {
         },
       })
 
-      // 順序が重要
-      await evalRubyFile(vm, hostBridgeScript, "app/hibana/host_bridge.rb") // 1. ブリッジ
-      registerHostFunctions(vm, env) // 2. ブリッジに関数を登録
-      await evalRubyFile(vm, templateRendererScript, "app/hibana/template_renderer.rb") // 3. テンプレート
-      await evalRubyFile(vm, contextScript, "app/hibana/context.rb") // 4. コンテキスト
-      await evalRubyFile(vm, durableObjectScript, "app/hibana/durable_object.rb") // 5. Durable Object DSL
-      await evalRubyFile(vm, cronScript, "app/hibana/cron.rb") // 6. Cron DSL
-      await evalRubyFile(vm, kvClientScript, "app/hibana/kv_client.rb") // 7. KVクライアント
-      await evalRubyFile(vm, queueClientScript, "app/hibana/queue_client.rb") // 8. Queueクライアント
-      await evalRubyFile(vm, d1ClientScript, "app/hibana/d1_client.rb") // 9. D1クライアント
-      await evalRubyFile(vm, ormScript, "app/hibana/orm.rb") // 10. ORM
-      await evalRubyFile(vm, r2ClientScript, "app/hibana/r2_client.rb") // 11. R2クライアント
-      await evalRubyFile(vm, vectorizeClientScript, "app/hibana/vectorize_client.rb") // 12. Vectorizeクライアント
-      await evalRubyFile(vm, httpClientScript, "app/hibana/http_client.rb") // 13. HTTPクライアント
-      await evalRubyFile(vm, workersAiClientScript, "app/hibana/workers_ai_client.rb") // 14. Workers AIクライアント
-      await evalRubyFile(vm, staticServerScript, "app/hibana/static_server.rb") // 15. 静的サーバー
-      await evalRubyFile(vm, htmlRewriterScript, "app/hibana/html_rewriter.rb") // 16. HTMLRewriter
-      await registerTemplates(vm) // 17. テンプレート資材をロード
-      await registerStaticAssets(vm) // 18. 静的アセットをロード
+      // Load order is important: HostBridge must be loaded first,
+      // then host functions registered, before other clients can use them.
+      await evalRubyFile(vm, hostBridgeScript, "app/hibana/host_bridge.rb")
+      registerHostFunctions(vm, env, getQueueManager())
+      await evalRubyFile(vm, templateRendererScript, "app/hibana/template_renderer.rb")
+      await evalRubyFile(vm, contextScript, "app/hibana/context.rb")
+      await evalRubyFile(vm, durableObjectScript, "app/hibana/durable_object.rb")
+      await evalRubyFile(vm, cronScript, "app/hibana/cron.rb")
+      await evalRubyFile(vm, kvClientScript, "app/hibana/kv_client.rb")
+      await evalRubyFile(vm, queueClientScript, "app/hibana/queue_client.rb")
+      await evalRubyFile(vm, d1ClientScript, "app/hibana/d1_client.rb")
+      await evalRubyFile(vm, ormScript, "app/hibana/orm.rb")
+      await evalRubyFile(vm, r2ClientScript, "app/hibana/r2_client.rb")
+      await evalRubyFile(vm, vectorizeClientScript, "app/hibana/vectorize_client.rb")
+      await evalRubyFile(vm, httpClientScript, "app/hibana/http_client.rb")
+      await evalRubyFile(vm, workersAiClientScript, "app/hibana/workers_ai_client.rb")
+      await evalRubyFile(vm, staticServerScript, "app/hibana/static_server.rb")
+      await evalRubyFile(vm, htmlRewriterScript, "app/hibana/html_rewriter.rb")
+      await registerTemplates(vm)
+      await registerStaticAssets(vm)
 
-      // 19. app/helpers 以下のファイルを順次読み込み
       for (const helper of getHelperScripts()) {
-        await evalRubyFile(vm, helper.source, helper.filename) // app/helpers配下
+        await evalRubyFile(vm, helper.source, helper.filename)
       }
 
-      await evalRubyFile(vm, routingScript, "app/hibana/routing.rb") // 20. ルーティングDSL
+      await evalRubyFile(vm, routingScript, "app/hibana/routing.rb")
 
       for (const script of getApplicationScripts()) {
         await evalRubyFile(vm, script.source, script.filename)
@@ -302,8 +179,9 @@ export async function handleQueue(
   bindingName?: string | null,
 ): Promise<void> {
   const vm = await setupRubyVM(env)
+  const queueManager = getQueueManager()
   const dispatcher = vm.eval("Hibana::Queues")
-  const { batchHandle, payload } = registerQueueBatch(batch, bindingName)
+  const { batchHandle, payload } = queueManager.registerBatch(batch, bindingName)
   const bindingArg =
     bindingName && bindingName.toString().length > 0
       ? vm.eval(toRubyStringLiteral(bindingName.toString()))
@@ -323,7 +201,7 @@ export async function handleQueue(
     }
     parseQueueResponse(serialized)
   } finally {
-    cleanupQueueBatch(batchHandle)
+    queueManager.cleanupBatch(batchHandle)
   }
 }
 
@@ -423,569 +301,6 @@ export function createDurableObjectClass(
   }
 }
 
-function registerHostFunctions(vm: RubyVM, env: Env): void {
-  const host = globalThis as HostGlobals
-  const redactHostErrors = shouldMaskHostError(env)
-
-  registerCallBindingHostFunction(host, env)
-  registerD1HostFunction(host, env)
-  registerHttpFetchHostFunction(host, env, redactHostErrors)
-  registerWorkersAiHostFunction(host, env)
-  registerVectorizeHostFunction(host, env)
-  registerHtmlRewriterHostFunction(host, vm, redactHostErrors)
-  registerDurableObjectHostFunctions(host, env)
-  registerQueueHostFunctions(host)
-  registerRubyErrorReporter(host)
-
-  vm.eval('require "js"')
-  registerHostBridgeBindings(vm, host)
-}
-
-function registerCallBindingHostFunction(host: HostGlobals, env: Env): void {
-  assignHostFnOnce(host, "tsCallBinding", () => {
-    return async (
-      binding: string,
-      method: string,
-      args: unknown[],
-    ): Promise<unknown> => {
-      const target = (env as Record<string, unknown>)[binding]
-      if (!target || typeof target !== "object") {
-        throw new Error(`Binding '${binding}' is not available`)
-      }
-      const targetMethod = (target as Record<string, unknown>)[method]
-      if (typeof targetMethod !== "function") {
-        throw new Error(`Method '${method}' is not available on '${binding}'`)
-      }
-      const result = await Reflect.apply(
-        targetMethod as (...methodArgs: unknown[]) => unknown,
-        target,
-        args,
-      )
-      if (result === undefined) {
-        return null
-      }
-      return result
-    }
-  })
-}
-
-function registerD1HostFunction(host: HostGlobals, env: Env): void {
-  // D1クエリを実行する汎用的な非同期関数
-  assignHostFnOnce(host, "tsRunD1Query", () => {
-    return async (
-      binding: string,
-      sql: string,
-      bindings: unknown[],
-      action: "first" | "all" | "run",
-    ): Promise<string> => {
-      try {
-        const db = (env as Record<string, unknown>)[binding]
-        if (!db || typeof db !== "object") {
-          throw new Error(`Binding '${binding}' is not available`)
-        }
-        const prepare = (db as Record<string, unknown>).prepare
-        if (typeof prepare !== "function") {
-          throw new Error(`Binding '${binding}' does not support prepare`)
-        }
-        const stmt = Reflect.apply(prepare, db, [sql]) as D1PreparedStatement
-        const bindingsArray = Array.isArray(bindings) ? bindings : [bindings]
-        const bindMethod = stmt.bind
-        if (typeof bindMethod !== "function") {
-          throw new Error(`Statement for '${binding}' does not support bind`)
-        }
-        const preparedStmt = Reflect.apply(
-          bindMethod,
-          stmt,
-          bindingsArray,
-        ) as D1PreparedStatement
-        let results: unknown
-        const firstMethod = preparedStmt.first
-        const allMethod = preparedStmt.all
-        const runMethod = preparedStmt.run
-        switch (action) {
-          case "first":
-            if (typeof firstMethod !== "function") {
-              throw new Error(`Statement for '${binding}' does not support first`)
-            }
-            results = await Reflect.apply(firstMethod, preparedStmt, [])
-            break
-          case "all":
-            if (typeof allMethod !== "function") {
-              throw new Error(`Statement for '${binding}' does not support all`)
-            }
-            const allResult = await Reflect.apply(allMethod, preparedStmt, [])
-            results =
-              typeof allResult === "object" && allResult && "results" in allResult
-                ? (allResult as { results: unknown }).results
-                : allResult
-            break
-          case "run":
-            if (typeof runMethod !== "function") {
-              throw new Error(`Statement for '${binding}' does not support run`)
-            }
-            results = await Reflect.apply(runMethod, preparedStmt, [])
-            break
-        }
-        return JSON.stringify({
-          ok: true,
-          result: results === undefined ? null : results,
-        })
-      } catch (rawError) {
-        const error = rawError instanceof Error ? rawError : new Error(String(rawError))
-        return JSON.stringify({
-          ok: false,
-          error: { message: error.message, name: error.name },
-        })
-      }
-    }
-  })
-}
-
-function registerHttpFetchHostFunction(
-  host: HostGlobals,
-  env: Env,
-  redactHostErrors: boolean,
-): void {
-  assignHostFnOnce(host, "tsHttpFetch", () => {
-    return async (payloadJson: string): Promise<string> => {
-      try {
-        const payload = parseHttpRequestPayload(payloadJson)
-        const result = await executeHttpFetch(payload, {
-          redactStack: redactHostErrors,
-          genericMessage: HOST_ERROR_GENERIC_MESSAGE,
-        })
-        return JSON.stringify(result)
-      } catch (rawError) {
-        const fallback: HttpFetchResponsePayload = {
-          ok: false,
-          error: buildHostErrorPayload(rawError, env),
-        }
-        return JSON.stringify(fallback)
-      }
-    }
-  })
-}
-
-function registerWorkersAiHostFunction(host: HostGlobals, env: Env): void {
-  assignHostFnOnce(host, "tsWorkersAiInvoke", () => {
-    return async (payloadJson: string): Promise<string> => {
-      try {
-        const payload = parseWorkersAiPayload(payloadJson)
-        const { bindingName, target } = resolveWorkersAiTarget(env, payload)
-        const { methodName, methodRef } = resolveWorkersAiMethod(target, bindingName, payload)
-        const args = resolveWorkersAiArgs(methodName, payload)
-        const result = await Reflect.apply(methodRef, target, args)
-        return JSON.stringify({ ok: true, result })
-      } catch (rawError) {
-        return JSON.stringify({
-          ok: false,
-          error: buildHostErrorPayload(rawError, env),
-        })
-      }
-    }
-  })
-}
-
-function registerVectorizeHostFunction(host: HostGlobals, env: Env): void {
-  assignHostFnOnce(host, "tsVectorizeInvoke", () => {
-    return async (payloadJson: string): Promise<string> => {
-      try {
-        const payload = parseVectorizePayload(payloadJson)
-        const binding = resolveVectorizeBinding(env, payload)
-        const result = await dispatchVectorizeAction(binding, payload)
-        return JSON.stringify({ ok: true, result })
-      } catch (rawError) {
-        return JSON.stringify({
-          ok: false,
-          error: buildHostErrorPayload(rawError, env),
-        })
-      }
-    }
-  })
-}
-
-function registerHtmlRewriterHostFunction(
-  host: HostGlobals,
-  vm: RubyVM,
-  redactHostErrors: boolean,
-): void {
-  assignHostFnOnce(host, "tsHtmlRewriterTransform", () => {
-    return async (payloadJson: string): Promise<string> => {
-      return transformHtmlWithRubyHandlers(vm, payloadJson, {
-        redactStack: redactHostErrors,
-        genericMessage: HOST_ERROR_GENERIC_MESSAGE,
-      })
-    }
-  })
-}
-
-function parseWorkersAiPayload(payloadJson: string): Record<string, unknown> {
-  const payload = JSON.parse(payloadJson) as WorkersAiPayload
-  if (!payload || typeof payload !== "object") {
-    throw new Error("Workers AI payload must be an object")
-  }
-  return payload as Record<string, unknown>
-}
-
-function resolveWorkersAiTarget(
-  env: Env,
-  payload: Record<string, unknown>,
-): { bindingName: string; target: Record<string, unknown> } {
-  const bindingValue = payload["binding"]
-  const bindingName =
-    typeof bindingValue === "string" && bindingValue.length > 0
-      ? bindingValue
-      : null
-  if (!bindingName) {
-    throw new Error("Workers AI payload is missing a binding name")
-  }
-  const target = (env as Record<string, unknown>)[bindingName]
-  if (!target || typeof target !== "object") {
-    throw new Error(`Binding '${bindingName}' is not available`)
-  }
-  return { bindingName, target: target as Record<string, unknown> }
-}
-
-function resolveWorkersAiMethod(
-  target: Record<string, unknown>,
-  bindingName: string,
-  payload: Record<string, unknown>,
-): {
-  methodName: string
-  methodRef: (...methodArgs: unknown[]) => unknown
-} {
-  const methodValue = payload["method"]
-  const methodName =
-    typeof methodValue === "string" && methodValue.length > 0
-      ? methodValue
-      : "run"
-  const methodRef = target[methodName]
-  if (typeof methodRef !== "function") {
-    throw new Error(`Method '${methodName}' is not available on '${bindingName}'`)
-  }
-  return {
-    methodName,
-    methodRef: methodRef as (...methodArgs: unknown[]) => unknown,
-  }
-}
-
-function resolveWorkersAiArgs(
-  methodName: string,
-  payload: Record<string, unknown>,
-): unknown[] {
-  const argsValue = payload["args"]
-  if (Array.isArray(argsValue)) {
-    return argsValue as unknown[]
-  }
-  return buildDefaultWorkersAiArgs(methodName, payload)
-}
-
-function buildDefaultWorkersAiArgs(
-  methodName: string,
-  payload: Record<string, unknown>,
-): unknown[] {
-  const modelValue = payload["model"]
-  const model =
-    typeof modelValue === "string" && modelValue.length > 0
-      ? modelValue
-      : undefined
-
-  if (methodName === "run") {
-    if (!model) {
-      throw new Error("Workers AI payload requires a model name")
-    }
-    const inputs = ensureRecord(payload["payload"], "payload")
-    return [model, inputs]
-  }
-
-  if (model !== undefined) {
-    const hasPayload = Object.prototype.hasOwnProperty.call(payload, "payload")
-    const extraArgs = hasPayload ? [payload["payload"]] : []
-    return [model, ...extraArgs]
-  }
-
-  if (Object.prototype.hasOwnProperty.call(payload, "payload")) {
-    return [payload["payload"]]
-  }
-
-  return []
-}
-
-function parseVectorizePayload(payloadJson: string): VectorizeInvokePayload {
-  const payload = JSON.parse(payloadJson) as VectorizeInvokePayload
-  if (!payload || typeof payload !== "object") {
-    throw new Error("Vectorize payload must be an object")
-  }
-  return payload
-}
-
-function resolveVectorizeBinding(
-  env: Env,
-  payload: VectorizeInvokePayload,
-): { bindingName: string; client: Record<string, unknown> } {
-  const bindingValue = payload.binding
-  const bindingName =
-    typeof bindingValue === "string" && bindingValue.length > 0
-      ? bindingValue
-      : null
-  if (!bindingName) {
-    throw new Error("Vectorize payload is missing a binding name")
-  }
-  const client = (env as Record<string, unknown>)[bindingName]
-  if (!client || typeof client !== "object") {
-    throw new Error(`Binding '${bindingName}' is not available`)
-  }
-  return { bindingName, client: client as Record<string, unknown> }
-}
-
-function dispatchVectorizeAction(
-  binding: { bindingName: string; client: Record<string, unknown> },
-  payload: VectorizeInvokePayload,
-): unknown {
-  const action = typeof payload.action === "string" ? payload.action : ""
-  const params = ensureVectorizeParams(payload.params)
-  switch (action) {
-    case "upsert":
-      return callVectorizeMethod(binding, "upsert", [
-        requireArray(params, "vectors"),
-      ])
-    case "query":
-      return callVectorizeMethod(binding, "query", buildVectorizeQueryArgs(params))
-    case "delete":
-      return callVectorizeMethod(binding, "delete", [
-        requireArray(params, "ids"),
-      ])
-    default:
-      throw new Error(`Unsupported Vectorize action '${action}'`)
-  }
-}
-
-function callVectorizeMethod(
-  binding: { bindingName: string; client: Record<string, unknown> },
-  methodName: string,
-  args: unknown[],
-): unknown {
-  const method = binding.client[methodName]
-  if (typeof method !== "function") {
-    throw new Error(`Method '${methodName}' is not available on '${binding.bindingName}'`)
-  }
-  return Reflect.apply(method as (...methodArgs: unknown[]) => unknown, binding.client, args)
-}
-
-function requireString(value: Record<string, unknown>, key: string): string {
-  const raw = value[key]
-  if (typeof raw !== "string" || raw.length === 0) {
-    throw new Error(`Vectorize payload is missing required string '${key}'`)
-  }
-  return raw
-}
-
-function requireArray(value: Record<string, unknown>, key: string): unknown[] {
-  const raw = value[key]
-  if (!Array.isArray(raw)) {
-    throw new Error(`Vectorize payload is missing required array '${key}'`)
-  }
-  return raw
-}
-
-function ensureVectorizeParams(value: unknown): Record<string, unknown> {
-  if (value === undefined || value === null) {
-    return {}
-  }
-  if (typeof value === "object" && !Array.isArray(value)) {
-    return value as Record<string, unknown>
-  }
-  throw new Error("Vectorize payload 'params' must be provided as an object")
-}
-
-function buildVectorizeQueryArgs(
-  params: Record<string, unknown>,
-): [unknown[], Record<string, unknown>?] {
-  const vector = requireArray(params, "vector")
-  const options: Record<string, unknown> = {}
-
-  if ("topK" in params) {
-    options.topK = requirePositiveInteger(params, "topK")
-  }
-  if ("includeMetadata" in params) {
-    options.includeMetadata = Boolean(params["includeMetadata"])
-  }
-  if ("includeValues" in params) {
-    options.includeValues = Boolean(params["includeValues"])
-  }
-  if ("filter" in params && params["filter"] !== undefined) {
-    const filter = params["filter"]
-    if (filter && typeof filter === "object" && !Array.isArray(filter)) {
-      options.filter = filter
-    } else {
-      throw new Error("Vectorize payload 'filter' must be an object when provided")
-    }
-  }
-
-  if (Object.keys(options).length === 0) {
-    return [vector]
-  }
-  return [vector, options]
-}
-
-function requirePositiveInteger(value: Record<string, unknown>, key: string): number {
-  const raw = value[key]
-  const parsed = Number(raw)
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`Vectorize payload '${key}' must be a positive integer`)
-  }
-  return parsed
-}
-
-function registerDurableObjectHostFunctions(host: HostGlobals, env: Env): void {
-  assignHostFnOnce(host, "tsDurableObjectStorageOp", () => {
-    return async (
-      stateHandle: string,
-      payloadJson: string,
-    ): Promise<string> => {
-      try {
-        const payload = JSON.parse(payloadJson) as DurableObjectStorageOpPayload
-        const result = await runDurableObjectStorageOp(stateHandle, payload)
-        return JSON.stringify(result)
-      } catch (rawError) {
-        const error = rawError instanceof Error ? rawError : new Error(String(rawError))
-        return JSON.stringify({
-          ok: false,
-          error: { message: error.message, name: error.name },
-        })
-      }
-    }
-  })
-
-  assignHostFnOnce(host, "tsDurableObjectAlarmOp", () => {
-    return async (
-      stateHandle: string,
-      payloadJson: string,
-    ): Promise<string> => {
-      try {
-        const payload = JSON.parse(payloadJson) as DurableObjectAlarmOpPayload
-        const result = await runDurableObjectAlarmOp(stateHandle, payload)
-        return JSON.stringify(result)
-      } catch (rawError) {
-        const error = rawError instanceof Error ? rawError : new Error(String(rawError))
-        return JSON.stringify({
-          ok: false,
-          error: { message: error.message, name: error.name },
-        })
-      }
-    }
-  })
-
-  assignHostFnOnce(host, "tsDurableObjectStubFetch", () => {
-    return async (payloadJson: string): Promise<string> => {
-      try {
-        const payload = JSON.parse(payloadJson) as DurableObjectStubFetchPayload
-        const result = await runDurableObjectStubFetch(env, payload)
-        return JSON.stringify(result)
-      } catch (rawError) {
-        const error = rawError instanceof Error ? rawError : new Error(String(rawError))
-        return JSON.stringify({
-          ok: false,
-          error: { message: error.message, name: error.name },
-        })
-      }
-    }
-  })
-}
-
-function registerQueueHostFunctions(host: HostGlobals): void {
-  assignHostFnOnce(host, "tsQueueMessageOp", () => {
-    return async (payloadJson: string): Promise<string> => {
-      return handleQueueMessageHostOp(payloadJson)
-    }
-  })
-
-  assignHostFnOnce(host, "tsQueueBatchOp", () => {
-    return async (payloadJson: string): Promise<string> => {
-      return handleQueueBatchHostOp(payloadJson)
-    }
-  })
-}
-
-function registerRubyErrorReporter(host: HostGlobals): void {
-  assignHostFnOnce(host, "tsReportRubyError", () => {
-    return async (payloadJson: string): Promise<void> => {
-      try {
-        const payload = JSON.parse(payloadJson) as {
-          message?: string
-          class?: string
-          backtrace?: unknown
-        }
-        const errorClass =
-          typeof payload?.class === "string" && payload.class.length > 0
-            ? payload.class
-            : "Error"
-        const message =
-          typeof payload?.message === "string" ? payload.message : ""
-        const backtrace = Array.isArray(payload?.backtrace)
-          ? payload.backtrace
-          : []
-        const backtraceText =
-          backtrace.length > 0 ? `\n${backtrace.join("\n")}` : ""
-        console.error(`[RubyError] ${errorClass}: ${message}${backtraceText}`)
-      } catch (error) {
-        console.error(
-          "[RubyError] Failed to parse error payload",
-          error,
-          "payload:",
-          payloadJson,
-        )
-      }
-    }
-  })
-}
-
-function registerHostBridgeBindings(vm: RubyVM, host: HostGlobals): void {
-  const HostBridge = vm.eval("HostBridge")
-  const bindings: Array<[string, keyof HostGlobals]> = [
-    ["ts_call_binding=", "tsCallBinding"],
-    ["ts_run_d1_query=", "tsRunD1Query"],
-    ["ts_http_fetch=", "tsHttpFetch"],
-    ["ts_workers_ai_invoke=", "tsWorkersAiInvoke"],
-    ["ts_vectorize_invoke=", "tsVectorizeInvoke"],
-    ["ts_report_ruby_error=", "tsReportRubyError"],
-    ["ts_html_rewriter_transform=", "tsHtmlRewriterTransform"],
-    ["ts_durable_object_storage_op=", "tsDurableObjectStorageOp"],
-    ["ts_durable_object_alarm_op=", "tsDurableObjectAlarmOp"],
-    ["ts_durable_object_stub_fetch=", "tsDurableObjectStubFetch"],
-    ["ts_queue_message_op=", "tsQueueMessageOp"],
-    ["ts_queue_batch_op=", "tsQueueBatchOp"],
-  ]
-
-  for (const [setter, key] of bindings) {
-    HostBridge.call(setter, vm.wrap(host[key]))
-  }
-}
-
-function assignHostFnOnce<K extends keyof HostGlobals>(
-  host: HostGlobals,
-  key: K,
-  factory: () => NonNullable<HostGlobals[K]>,
-): void {
-  if (typeof host[key] === "function") {
-    return
-  }
-  host[key] = factory() as HostGlobals[K]
-}
-
-function ensureRecord(
-  value: unknown,
-  label: string,
-): Record<string, unknown> {
-  if (value === undefined || value === null) {
-    return {}
-  }
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value as Record<string, unknown>
-  }
-  throw new Error(`Workers AI payload '${label}' must be provided as an object`)
-}
-
 function parseRubyResponsePayload(serialized: string): WorkerResponsePayload {
   let parsed: unknown
   try {
@@ -1056,38 +371,6 @@ function buildQueryObject(
   return query
 }
 
-function buildHostErrorPayload(rawError: unknown, env: Env): HostErrorPayload {
-  const error = rawError instanceof Error ? rawError : new Error(String(rawError))
-  const redactDetails = shouldMaskHostError(env)
-  const payload: HostErrorPayload = {
-    message: redactDetails ? HOST_ERROR_GENERIC_MESSAGE : error.message,
-    name: error.name || "Error",
-  }
-  if (!redactDetails && error.stack) {
-    payload.stack = error.stack
-  }
-  return payload
-}
-
-function shouldMaskHostError(env: Env): boolean {
-  const normalized = resolveEnvironmentName(env)
-  return normalized === "production" || normalized === "prod"
-}
-
-function resolveEnvironmentName(env: Env): string | undefined {
-  if (!env || typeof env !== "object") {
-    return undefined
-  }
-  const record = env as Record<string, unknown>
-  for (const key of ["ENVIRONMENT", "NODE_ENV"]) {
-    const value = record[key]
-    if (typeof value === "string" && value.trim().length > 0) {
-      return value.trim().toLowerCase()
-    }
-  }
-  return undefined
-}
-
 function buildScheduledPayload(
   event: RuntimeScheduledEvent,
 ): Record<string, unknown> {
@@ -1115,56 +398,6 @@ function buildScheduledPayload(
   }
 
   return payload
-}
-
-function registerQueueBatch(
-  batch: QueueMessageBatch<unknown>,
-  bindingName?: string | null,
-): { batchHandle: string; payload: SerializedQueueBatch } {
-  const batchHandle = nextQueueHandle("queue-batch")
-  const binding =
-    bindingName && bindingName.toString().length > 0
-      ? bindingName.toString()
-      : null
-  const messageHandles: string[] = []
-  const messages = (batch.messages || []).map((message, index) => {
-    const handle = `${batchHandle}:${index}`
-    messageHandles.push(handle)
-    queueMessageHandles.set(handle, {
-      batchHandle,
-      message,
-    })
-    return {
-      handle,
-      id: message.id?.toString() ?? "",
-      attempts: typeof message.attempts === "number" ? message.attempts : 0,
-      timestamp: toUnixMilliseconds(message.timestamp),
-      body: serializeQueueBody(message.body),
-    }
-  })
-  queueBatchHandles.set(batchHandle, {
-    batch,
-    messageHandles,
-  })
-  return {
-    batchHandle,
-    payload: {
-      binding,
-      queue: batch.queue ?? "",
-      batchHandle,
-      messages,
-    },
-  }
-}
-
-function cleanupQueueBatch(batchHandle: string): void {
-  const record = queueBatchHandles.get(batchHandle)
-  if (record) {
-    for (const handle of record.messageHandles) {
-      queueMessageHandles.delete(handle)
-    }
-    queueBatchHandles.delete(batchHandle)
-  }
 }
 
 function parseQueueResponse(serialized: string): void {
@@ -1204,155 +437,13 @@ function parseQueueResponse(serialized: string): void {
   }
 }
 
-function toUnixMilliseconds(value: Date | number | undefined): number {
-  if (value instanceof Date) {
-    return value.getTime()
-  }
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value
-  }
-  return Date.now()
-}
-
-function serializeQueueBody(body: unknown): SerializedQueueBody {
-  if (typeof body === "string") {
-    return { format: "text", text: body }
-  }
-  try {
-    const json = JSON.stringify(body ?? null)
-    return { format: "json", json: json ?? "null" }
-  } catch {
-    return { format: "text", text: String(body ?? "") }
-  }
-}
-
-function nextQueueHandle(prefix: string): string {
-  queueHandleCounter += 1
-  return `${prefix}-${queueHandleCounter}-${Math.random().toString(36).slice(2)}`
-}
-
-async function handleQueueMessageHostOp(payloadJson: string): Promise<string> {
-  try {
-    const payload = JSON.parse(payloadJson) as {
-      handle?: string
-      op?: string
-      delaySeconds?: unknown
-    }
-    const handle = payload.handle
-    if (!handle) {
-      throw new Error("Queue message handle is required")
-    }
-    const record = queueMessageHandles.get(handle)
-    if (!record) {
-      throw new Error(`Queue message handle '${handle}' is not active`)
-    }
-    if (payload.op !== "ack" && payload.op !== "retry") {
-      throw new Error(`Unsupported queue message op '${payload.op}'`)
-    }
-    try {
-      switch (payload.op) {
-        case "ack":
-          await maybeAwait(record.message.ack())
-          break
-        case "retry":
-          await maybeAwait(
-            record.message.retry({
-              delaySeconds: normalizeDelaySeconds(payload.delaySeconds),
-            }),
-          )
-          break
-      }
-    } finally {
-      queueMessageHandles.delete(handle)
-    }
-    return JSON.stringify({ ok: true })
-  } catch (error) {
-    return JSON.stringify({
-      ok: false,
-      error: {
-        message: error instanceof Error ? error.message : String(error),
-      },
-    })
-  }
-}
-
-async function handleQueueBatchHostOp(payloadJson: string): Promise<string> {
-  try {
-    const payload = JSON.parse(payloadJson) as {
-      handle?: string
-      op?: string
-      delaySeconds?: unknown
-    }
-    const handle = payload.handle
-    if (!handle) {
-      throw new Error("Queue batch handle is required")
-    }
-    const record = queueBatchHandles.get(handle)
-    if (!record) {
-      throw new Error(`Queue batch handle '${handle}' is not active`)
-    }
-    switch (payload.op) {
-      case "ack_all":
-        await maybeAwait(record.batch.ackAll())
-        markBatchMessagesHandled(handle)
-        break
-      case "retry_all":
-        await maybeAwait(
-          record.batch.retryAll({
-            delaySeconds: normalizeDelaySeconds(payload.delaySeconds),
-          }),
-        )
-        markBatchMessagesHandled(handle)
-        break
-      default:
-        throw new Error(`Unsupported queue batch op '${payload.op}'`)
-    }
-    return JSON.stringify({ ok: true })
-  } catch (error) {
-    return JSON.stringify({
-      ok: false,
-      error: {
-        message: error instanceof Error ? error.message : String(error),
-      },
-    })
-  }
-}
-
-async function maybeAwait(result: void | Promise<void>): Promise<void> {
-  if (result && typeof (result as Promise<void>).then === "function") {
-    await result
-  }
-}
-
-function normalizeDelaySeconds(value: unknown): number | undefined {
-  if (value === undefined || value === null || value === "") {
-    return undefined
-  }
-  const parsed = Number(value)
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    throw new Error("delaySeconds must be a non-negative number")
-  }
-  return Math.floor(parsed)
-}
-
-function markBatchMessagesHandled(batchHandle: string): void {
-  const record = queueBatchHandles.get(batchHandle)
-  if (!record) {
-    return
-  }
-  for (const handle of record.messageHandles) {
-    queueMessageHandles.delete(handle)
-  }
-  record.messageHandles = []
-}
-
 async function populateBodyOnContext(
   context: RbValue,
   request: Request,
   vm: RubyVM,
 ): Promise<void> {
   const method = request.method.toUpperCase()
-  if (!["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+  if (!METHODS_WITH_BODY.includes(method as (typeof METHODS_WITH_BODY)[number])) {
     contextCall(context, "set_raw_body", vm.eval('""'))
     contextCall(context, "set_json_body", vm.eval("nil"))
     contextCall(context, "set_form_body", vm.eval("nil"))
