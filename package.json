@@ -35,10 +35,10 @@
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-n": "^17.9.0",
     "eslint-plugin-promise": "^6.1.1",
-    "prettier": "^3.2.5",
-    "tsup": "^8.0.1",
+    "prettier": "^3.8.1",
+    "rimraf": "^5.0.7",
+    "tsup": "^8.5.1",
     "typescript": "^5.4.5",
-    "vitest": "^1.4.0",
-    "rimraf": "^5.0.7"
+    "vitest": "^1.4.0"
   }
 }
