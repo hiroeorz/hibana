@@ -1,5 +1,5 @@
 import type { Env } from "../env"
-import { buildHostErrorPayload } from "../runtime-types"
+import { wrapHostOperation } from "../runtime-types"
 import type { VectorizeInvokePayload } from "../runtime-types"
 import type { HostGlobals } from "./types"
 import { assignHostFnOnce } from "./types"
@@ -7,17 +7,11 @@ import { assignHostFnOnce } from "./types"
 export function registerVectorizeHostFunction(host: HostGlobals, env: Env): void {
   assignHostFnOnce(host, "tsVectorizeInvoke", () => {
     return async (payloadJson: string): Promise<string> => {
-      try {
+      return wrapHostOperation(async () => {
         const payload = parseVectorizePayload(payloadJson)
         const binding = resolveVectorizeBinding(env, payload)
-        const result = await dispatchVectorizeAction(binding, payload)
-        return JSON.stringify({ ok: true, result })
-      } catch (rawError) {
-        return JSON.stringify({
-          ok: false,
-          error: buildHostErrorPayload(rawError, env),
-        })
-      }
+        return await dispatchVectorizeAction(binding, payload)
+      }, env)
     }
   })
 }

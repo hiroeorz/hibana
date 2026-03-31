@@ -1,5 +1,5 @@
 import type { Env } from "../env"
-import { buildHostErrorPayload, ensureRecord } from "../runtime-types"
+import { ensureRecord, wrapHostOperation } from "../runtime-types"
 import type { WorkersAiPayload } from "../runtime-types"
 import type { HostGlobals } from "./types"
 import { assignHostFnOnce } from "./types"
@@ -7,19 +7,13 @@ import { assignHostFnOnce } from "./types"
 export function registerWorkersAiHostFunction(host: HostGlobals, env: Env): void {
   assignHostFnOnce(host, "tsWorkersAiInvoke", () => {
     return async (payloadJson: string): Promise<string> => {
-      try {
+      return wrapHostOperation(async () => {
         const payload = parseWorkersAiPayload(payloadJson)
         const { bindingName, target } = resolveWorkersAiTarget(env, payload)
         const { methodName, methodRef } = resolveWorkersAiMethod(target, bindingName, payload)
         const args = resolveWorkersAiArgs(methodName, payload)
-        const result = await Reflect.apply(methodRef, target, args)
-        return JSON.stringify({ ok: true, result })
-      } catch (rawError) {
-        return JSON.stringify({
-          ok: false,
-          error: buildHostErrorPayload(rawError, env),
-        })
-      }
+        return await Reflect.apply(methodRef, target, args)
+      }, env)
     }
   })
 }

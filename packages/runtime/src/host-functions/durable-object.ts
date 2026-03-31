@@ -13,12 +13,12 @@ import {
 import type { HostGlobals } from "./types"
 import { assignHostFnOnce } from "./types"
 
+// Note: Durable Object functions (runDurableObjectStorageOp, runDurableObjectAlarmOp,
+// runDurableObjectStubFetch) already return {ok, result/error} format internally,
+// so we must NOT use wrapHostOperation here to avoid double-wrapping.
 export function registerDurableObjectHostFunctions(host: HostGlobals, env: Env): void {
   assignHostFnOnce(host, "tsDurableObjectStorageOp", () => {
-    return async (
-      stateHandle: string,
-      payloadJson: string,
-    ): Promise<string> => {
+    return async (stateHandle: string, payloadJson: string): Promise<string> => {
       try {
         const payload = JSON.parse(payloadJson) as DurableObjectStorageOpPayload
         const result = await runDurableObjectStorageOp(stateHandle, payload)
@@ -30,10 +30,7 @@ export function registerDurableObjectHostFunctions(host: HostGlobals, env: Env):
   })
 
   assignHostFnOnce(host, "tsDurableObjectAlarmOp", () => {
-    return async (
-      stateHandle: string,
-      payloadJson: string,
-    ): Promise<string> => {
+    return async (stateHandle: string, payloadJson: string): Promise<string> => {
       try {
         const payload = JSON.parse(payloadJson) as DurableObjectAlarmOpPayload
         const result = await runDurableObjectAlarmOp(stateHandle, payload)

@@ -150,3 +150,23 @@ export function ensureRecord(
   }
   throw new Error(`Workers AI payload '${label}' must be provided as an object`)
 }
+
+export type HostOperationResult<T> = { ok: true; result: T } | { ok: false; error: HostErrorPayload }
+
+export async function wrapHostOperation<T>(
+  operation: () => Promise<T>,
+  env?: Env,
+): Promise<string> {
+  try {
+    const result = await operation()
+    return JSON.stringify({ ok: true, result })
+  } catch (rawError) {
+    if (env) {
+      return JSON.stringify({
+        ok: false,
+        error: buildHostErrorPayload(rawError, env),
+      })
+    }
+    return createErrorResponse(rawError)
+  }
+}
